@@ -120,6 +120,10 @@ tr.flash td{animation:flash 1.6s ease-out}
 .slot{display:flex;align-items:center;gap:12px;background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:10px 12px;transition:.15s}
 .slot.target{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 20%,transparent)}
 .slot.filled{border-color:var(--ok);background:var(--ok-soft)}
+.slot.next{border-color:var(--accent);animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 40%,transparent)}50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 12%,transparent)}}
+.step{margin-top:10px;padding:12px 14px;border-radius:14px;background:var(--accent-soft);color:var(--text);font-weight:700;font-size:15px;text-align:center}
+.step small{display:block;font-weight:500;color:var(--muted);font-size:12px;margin-top:2px}
 .slot .lab{width:62px;font-weight:700;font-size:13px;color:var(--muted);flex:none}
 .slot input{flex:1;min-width:0;border:none;background:transparent;color:var(--text);font:600 15px var(--mono);outline:none}
 .slot button{border:none;background:none;font-size:18px;color:var(--muted)}
@@ -216,11 +220,12 @@ tr.flash td{animation:flash 1.6s ease-out}
     <button class="icon-btn" id="pTheme">🌓</button>
   </div>
   <div id="reader"></div>
-  <p class="hint" id="pHint">Scan the three barcodes on the label (Serial, IMEI 1, IMEI 2) one by one, in any order. 15-digit codes are detected as IMEI automatically. When all three are filled, the row goes to the sheet.</p>
+  <div class="step" id="stepBanner"></div>
+  <p class="hint" id="pHint">Scan in the same order as the label: <b>S/N</b>, then <b>IMEI1</b>, then <b>IMEI2</b>. Aim the thin scan line at ONE barcode at a time. Each number is checked before it is accepted. When all three are filled, the row goes to the sheet.</p>
   <div class="slots">
-    <div class="slot" data-k="sn"><span class="lab">Serial</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
-    <div class="slot" data-k="i1"><span class="lab">IMEI 1</span><input id="f_i1" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
-    <div class="slot" data-k="i2"><span class="lab">IMEI 2</span><input id="f_i2" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
+    <div class="slot" data-k="sn"><span class="lab">S/N</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
+    <div class="slot" data-k="i1"><span class="lab">IMEI1</span><input id="f_i1" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
+    <div class="slot" data-k="i2"><span class="lab">IMEI2</span><input id="f_i2" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
   </div>
   <div class="phone-actions">
     <button class="btn" id="pClear">Clear</button>
@@ -229,6 +234,7 @@ tr.flash td{animation:flash 1.6s ease-out}
   <div class="phone-actions" style="margin-top:10px">
     <button class="btn" id="pCam">📷 Start / stop camera</button>
   </div>
+  <label class="toggle" style="margin-top:10px;width:100%"><input type="checkbox" id="strict" checked> Strict check: IMEI must be a valid 15-digit number, S/N must not be one</label>
   <div class="recent"><h3>Recently sent</h3><div id="recent"></div></div>
 </div>
 
@@ -273,6 +279,8 @@ const buzz = p => { try{ navigator.vibrate && navigator.vibrate(p);}catch(e){} }
 
 const normV = v => String(v||'').trim().toUpperCase();
 const isImei = v => /^\d{14,16}$/.test(v);
+const luhn = v => { let sum=0, alt=false; for(let i=v.length-1;i>=0;i--){ let n=+v[i]; if(alt){ n*=2; if(n>9) n-=9; } sum+=n; alt=!alt; } return sum%10===0; };
+const isImei15 = v => /^\d{15}$/.test(v) && luhn(v);
 const CODE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const makeCode = () => Array.from({length:6},()=>CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]).join('');
 const uid = () => Math.random().toString(36).slice(2,9);
@@ -571,12 +579,21 @@ function initPhone(code){
     });
   }
 
+  const ORDER=['sn','i1','i2'];
+  const LABEL={sn:'S/N',i1:'IMEI1',i2:'IMEI2'};
+  function nextKey(){ return target || ORDER.find(k=>!slots[k].value.trim()) || null; }
   function paint(){
+    const nk=nextKey();
     $$('.slot').forEach(s=>{
       const k=s.dataset.k;
       s.classList.toggle('filled',!!slots[k].value.trim());
       s.classList.toggle('target',target===k);
+      s.classList.toggle('next',nk===k);
     });
+    const done=ORDER.filter(k=>slots[k].value.trim()).length;
+    $('#stepBanner').innerHTML = nk
+      ? 'Scan now: '+LABEL[nk]+'<small>'+done+' of 3 done</small>'
+      : 'All 3 scanned ✔<small>Sending to sheet…</small>';
   }
   $$('.slot').forEach(s=>{
     const k=s.dataset.k;
@@ -589,30 +606,43 @@ function initPhone(code){
   function clearSlots(){ Object.values(slots).forEach(i=>i.value=''); target=null; paint(); }
   $('#pClear').onclick=clearSlots;
 
+  let lastReject='', lastRejectT=0;
+  function reject(msg,text){
+    const now=Date.now();
+    if(text===lastReject && now-lastRejectT<3000) return;
+    lastReject=text; lastRejectT=now;
+    toast(msg,'bad'); buzz([120,60,120]); beep(260,200);
+  }
+
+  /* Puts a scanned value into the correct box.
+     The barcode only contains digits/letters, NOT the printed label (S/N, IMEI1, IMEI2),
+     so the order S/N -> IMEI1 -> IMEI2 decides the box, and the value is validated. */
   function place(text){
     const v=Object.fromEntries(Object.entries(slots).map(([k,i])=>[k,i.value.trim()]));
-    if(Object.values(v).map(normV).includes(normV(text))) return false; // already scanned
-    if(target){ slots[target].value=text; target=null; return true; }
-    if(isImei(text)){
-      if(!v.i1) slots.i1.value=text;
-      else if(!v.i2) slots.i2.value=text;
-      else if(!v.sn) slots.sn.value=text;
-      else return false;
-    }else{
-      if(!v.sn) slots.sn.value=text;
-      else if(!v.i1) slots.i1.value=text;
-      else if(!v.i2) slots.i2.value=text;
-      else return false;
+    if(Object.values(v).map(normV).includes(normV(text))){ reject('Already scanned: '+text,text); return false; }
+    const k=nextKey();
+    if(!k) return false;
+    if($('#strict').checked){
+      const ok=isImei15(text);
+      if(k==='sn' && ok){ reject('That is an IMEI number. Scan the S/N barcode now.',text); return false; }
+      if(k!=='sn' && !ok){ reject('Not a valid IMEI ('+text+'). Scan the '+LABEL[k]+' barcode.',text); return false; }
     }
+    slots[k].value=text; target=null;
     return true;
   }
 
+  // A code is accepted only after the camera reads the same value twice in a row (avoids misreads)
+  let cand='', candN=0, candT=0;
   function onScan(text){
     text=String(text||'').trim(); if(!text) return;
     const now=Date.now();
     if(text===lastText && now-lastTime<2500){ lastTime=now; return; }
+    if(text===cand && now-candT<1500) candN++; else { cand=text; candN=1; }
+    candT=now;
+    if(candN<2) return;
+    cand=''; candN=0;
     lastText=text; lastTime=now;
-    if(place(text)){ beep(1200,70); buzz(40); paint(); trySend(); }
+    if(place(text)){ beep(1200,70); buzz(40); toast('✔ '+LABEL[ORDER.find(k=>slots[k].value.trim()===text)]+': '+text,'ok'); paint(); trySend(); }
   }
 
   function trySend(){
@@ -645,7 +675,7 @@ function initPhone(code){
     });
     try{
       await scanner.start({facingMode:'environment'},
-        {fps:12, qrbox:(w,h)=>({width:Math.floor(w*0.9),height:Math.floor(Math.min(h*0.5,140))}), aspectRatio:1.5},
+        {fps:12, qrbox:(w,h)=>({width:Math.floor(w*0.9),height:80}), aspectRatio:1.5},
         onScan, ()=>{});
       running=true;
     }catch(e){
