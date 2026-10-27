@@ -113,8 +113,12 @@ tr.flash td{animation:flash 1.6s ease-out}
 #phone{max-width:520px;margin:0 auto;padding:max(14px,env(safe-area-inset-top)) 14px max(24px,env(safe-area-inset-bottom))}
 .phone-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .phone-head h1{margin:0;font-size:18px;font-weight:800;margin-right:auto}
-#reader{width:100%;border-radius:20px;overflow:hidden;background:#000;min-height:240px;border:2px solid var(--line)}
-#reader video{object-fit:cover}
+#camWrap{display:grid;place-items:center;background:#000;border-radius:20px;border:2px solid var(--line);overflow:hidden;min-height:260px}
+#cam{position:relative;width:100%;aspect-ratio:3/4;max-height:60vh}
+#cam video{width:100%;height:100%;display:block}
+#ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.frame{position:absolute;inset:4%;border:3px dashed rgba(255,255,255,.8);border-radius:18px;pointer-events:none}
+.frame::after{content:"Fit the WHOLE label inside this box";position:absolute;left:50%;top:-1px;transform:translate(-50%,-50%);background:rgba(0,0,0,.7);color:#fff;font:600 11px var(--sans);padding:3px 10px;border-radius:999px;white-space:nowrap}
 .hint{color:var(--muted);font-size:13px;margin:10px 2px;line-height:1.5}
 .slots{display:grid;gap:10px;margin:12px 0}
 .slot{display:flex;align-items:center;gap:12px;background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:10px 12px;transition:.15s}
@@ -219,9 +223,9 @@ tr.flash td{animation:flash 1.6s ease-out}
     <span class="chip"><span class="dot" id="pDot"></span><span id="pStatus">Connecting…</span></span>
     <button class="icon-btn" id="pTheme">🌓</button>
   </div>
-  <div id="reader"></div>
+  <div id="camWrap"><div id="cam"><video id="vid" playsinline muted autoplay></video><canvas id="ov"></canvas><div class="frame"></div></div></div>
   <div class="step" id="stepBanner"></div>
-  <p class="hint" id="pHint">Scan in the same order as the label: <b>S/N</b>, then <b>IMEI1</b>, then <b>IMEI2</b>. Aim the thin scan line at ONE barcode at a time. Each number is checked before it is accepted. When all three are filled, the row goes to the sheet.</p>
+  <p class="hint" id="pHint">Hold the phone so <b>all the barcodes</b> (S/N, IMEI1, IMEI2) fit inside the big box. Every barcode in view is read together, 3 barcodes give 3 values, 2 barcodes give 2. They are placed top to bottom, then the row is sent to the sheet automatically.</p>
   <div class="slots">
     <div class="slot" data-k="sn"><span class="lab">S/N</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
     <div class="slot" data-k="i1"><span class="lab">IMEI1</span><input id="f_i1" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
@@ -234,7 +238,7 @@ tr.flash td{animation:flash 1.6s ease-out}
   <div class="phone-actions" style="margin-top:10px">
     <button class="btn" id="pCam">📷 Start / stop camera</button>
   </div>
-  <label class="toggle" style="margin-top:10px;width:100%"><input type="checkbox" id="strict" checked> Strict check: IMEI must be a valid 15-digit number, S/N must not be one</label>
+  <label class="toggle" style="margin-top:10px;width:100%"><input type="checkbox" id="strict" checked> Smart sort: detect IMEI by its checksum (off = plain top-to-bottom order)</label>
   <div class="recent"><h3>Recently sent</h3><div id="recent"></div></div>
 </div>
 
@@ -242,7 +246,7 @@ tr.flash td{animation:flash 1.6s ease-out}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 (function(){
@@ -581,111 +585,213 @@ function initPhone(code){
 
   const ORDER=['sn','i1','i2'];
   const LABEL={sn:'S/N',i1:'IMEI1',i2:'IMEI2'};
-  function nextKey(){ return target || ORDER.find(k=>!slots[k].value.trim()) || null; }
-  function paint(){
-    const nk=nextKey();
-    $$('.slot').forEach(s=>{
-      const k=s.dataset.k;
-      s.classList.toggle('filled',!!slots[k].value.trim());
-      s.classList.toggle('target',target===k);
-      s.classList.toggle('next',nk===k);
-    });
-    const done=ORDER.filter(k=>slots[k].value.trim()).length;
-    $('#stepBanner').innerHTML = nk
-      ? 'Scan now: '+LABEL[nk]+'<small>'+done+' of 3 done</small>'
-      : 'All 3 scanned ✔<small>Sending to sheet…</small>';
-  }
+  function banner(main,sub){ $('#stepBanner').innerHTML=main+(sub?'<small>'+sub+'</small>':''); }
+  function paint(){ $$('.slot').forEach(s=>s.classList.toggle('filled',!!slots[s.dataset.k].value.trim())); }
   $$('.slot').forEach(s=>{
     const k=s.dataset.k;
-    s.addEventListener('click',e=>{
-      if(e.target.tagName==='BUTTON'){ slots[k].value=''; target=null; paint(); return; }
-      if(e.target.tagName!=='INPUT'){ target=(target===k?null:k); paint(); if(target) toast('Next scan goes to '+s.querySelector('.lab').textContent); }
-    });
-    slots[k].addEventListener('input',()=>{ paint(); trySend(); });
+    s.querySelector('button').onclick=()=>{ slots[k].value=''; paint(); };
+    slots[k].addEventListener('input',paint);
   });
-  function clearSlots(){ Object.values(slots).forEach(i=>i.value=''); target=null; paint(); }
+  const READY='Show the whole label to the camera';
+  function clearSlots(){
+    clearTimeout(sendTimer); sendTimer=null;
+    Object.values(slots).forEach(i=>i.value=''); paint();
+    banner(READY,'All barcodes are read together');
+  }
   $('#pClear').onclick=clearSlots;
 
-  let lastReject='', lastRejectT=0;
-  function reject(msg,text){
-    const now=Date.now();
-    if(text===lastReject && now-lastRejectT<3000) return;
-    lastReject=text; lastRejectT=now;
-    toast(msg,'bad'); buzz([120,60,120]); beep(260,200);
-  }
-
-  /* Puts a scanned value into the correct box.
-     The barcode only contains digits/letters, NOT the printed label (S/N, IMEI1, IMEI2),
-     so the order S/N -> IMEI1 -> IMEI2 decides the box, and the value is validated. */
-  function place(text){
-    const v=Object.fromEntries(Object.entries(slots).map(([k,i])=>[k,i.value.trim()]));
-    if(Object.values(v).map(normV).includes(normV(text))){ reject('Already scanned: '+text,text); return false; }
-    const k=nextKey();
-    if(!k) return false;
-    if($('#strict').checked){
-      const ok=isImei15(text);
-      if(k==='sn' && ok){ reject('That is an IMEI number. Scan the S/N barcode now.',text); return false; }
-      if(k!=='sn' && !ok){ reject('Not a valid IMEI ('+text+'). Scan the '+LABEL[k]+' barcode.',text); return false; }
-    }
-    slots[k].value=text; target=null;
-    return true;
-  }
-
-  // A code is accepted only after the camera reads the same value twice in a row (avoids misreads)
-  let cand='', candN=0, candT=0;
-  function onScan(text){
-    text=String(text||'').trim(); if(!text) return;
-    const now=Date.now();
-    if(text===lastText && now-lastTime<2500){ lastTime=now; return; }
-    if(text===cand && now-candT<1500) candN++; else { cand=text; candN=1; }
-    candT=now;
-    if(candN<2) return;
-    cand=''; candN=0;
-    lastText=text; lastTime=now;
-    if(place(text)){ beep(1200,70); buzz(40); toast('✔ '+LABEL[ORDER.find(k=>slots[k].value.trim()===text)]+': '+text,'ok'); paint(); trySend(); }
-  }
-
-  function trySend(){
-    clearTimeout(sendTimer);
-    if(Object.values(slots).every(i=>i.value.trim())) sendTimer=setTimeout(send,700); // short pause so you can fix a wrong scan
-  }
-
   function send(){
+    clearTimeout(sendTimer); sendTimer=null;
     const sn=slots.sn.value.trim(), i1=slots.i1.value.trim(), i2=slots.i2.value.trim();
-    if(!sn && !i1 && !i2){ toast('Scan something first','bad'); return; }
+    if(!sn && !i1 && !i2){ toast('Nothing to send yet','bad'); return; }
     if(!conn || !conn.open){ toast('Not connected to the sheet','bad'); connect(); return; }
     conn.send({type:'row',sn,i1,i2});
     clearSlots();
+    banner('Sent ✔','Move the label away, then show the next one');
   }
   $('#pSend').onclick=send;
 
-  let scanner, running=false;
+  /* ---- decide which barcode goes to which box ----
+     The barcode holds only its number, not the printed words S/N / IMEI1 / IMEI2.
+     So: sort codes top to bottom (left to right if on the same line), recognise IMEI by its
+     15-digit checksum, and fall back to plain top-to-bottom order (S/N, IMEI1, IMEI2). */
+  function sortCodes(list,H){
+    const tol=H*0.04;
+    return list.slice().sort((a,b)=>Math.abs(a.y-b.y)<tol ? a.x-b.x : a.y-b.y);
+  }
+  function assign(sorted){
+    const t=sorted.map(c=>c.text), out={sn:'',i1:'',i2:''};
+    if($('#strict').checked){
+      const im=t.filter(isImei15), non=t.filter(x=>!isImei15(x));
+      if((non.length===1 && im.length<=2) || (non.length===0 && im.length===2)){
+        out.sn=non[0]||''; out.i1=im[0]||''; out.i2=im[1]||''; return out;
+      }
+    }
+    out.sn=t[0]||''; out.i1=t[1]||''; out.i2=t[2]||''; return out;
+  }
+  function capture(list,H){
+    const a=assign(sortCodes(list,H));
+    ORDER.forEach(k=>slots[k].value=a[k]); paint();
+    const n=ORDER.filter(k=>a[k]).length;
+    beep(1200,80); buzz(60);
+    if(list.length>3) toast('More than 3 barcodes in view, check the values','bad');
+    if(n>=2){
+      banner('Captured '+n+' barcodes ✔','Sending in a moment. Tap Clear to cancel');
+      clearTimeout(sendTimer); sendTimer=setTimeout(send,1200);
+    }else{
+      banner('Only 1 barcode found','Move back so the whole label fits, or type the rest');
+    }
+  }
+
+  /* A set of codes is accepted only when the same set is seen in 3 frames in a row. */
+  let prevKey='', stable=0, lockKey='', emptySince=0, pending=[];
+  function handleCodes(list,H){
+    const now=Date.now();
+    if(!list.length){
+      prevKey=''; stable=0;
+      if(!emptySince) emptySince=now;
+      if(now-emptySince>900) lockKey='';
+      return;
+    }
+    emptySince=0;
+    const key=list.map(c=>c.text).sort().join('|');
+    if(!sendTimer) banner('Detected '+list.length+(list.length===1?' barcode':' barcodes'),'Hold steady…');
+    if(key===lockKey) return;
+    if(key===prevKey) stable++; else { prevKey=key; stable=1; }
+    if(stable<3) return;
+    if(sendTimer){ // inside the short send window: only accept a bigger set that includes what we already captured
+      const texts=list.map(c=>c.text);
+      if(!(pending.every(t=>texts.includes(t)) && texts.length>pending.length)) return;
+    }
+    pending=list.map(c=>c.text); lockKey=key; prevKey=''; stable=0;
+    capture(list,H);
+  }
+
+  /* ---- camera + multi-barcode detection ---- */
+  const vid=$('#vid'), ov=$('#ov'), cam=$('#cam'), octx=ov.getContext('2d');
+  const FMT=['code_128','code_39','code_93','ean_13','ean_8','upc_a','upc_e','itf','codabar','qr_code','data_matrix'];
+  let stream=null, running=false, timer=null, busy=false, mode='', detector=null, engineReady=false;
+  let zReader=null, zHints=null;
+  const fc=document.createElement('canvas'), bc=document.createElement('canvas');
+  const fctx=fc.getContext('2d',{willReadFrequently:true}), bctx=bc.getContext('2d',{willReadFrequently:true});
+
+  async function initEngine(){
+    if(engineReady) return; engineReady=true;
+    if('BarcodeDetector' in window){
+      try{
+        const sup=await BarcodeDetector.getSupportedFormats();
+        const f=FMT.filter(x=>sup.includes(x));
+        if(f.length){ detector=new BarcodeDetector({formats:f}); mode='native'; return; }
+      }catch(e){}
+    }
+    if(window.ZXing){
+      const Z=window.ZXing;
+      zReader=new Z.MultiFormatReader();
+      zHints=new Map();
+      zHints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.CODE_128,Z.BarcodeFormat.CODE_39,Z.BarcodeFormat.CODE_93,Z.BarcodeFormat.EAN_13,Z.BarcodeFormat.EAN_8,Z.BarcodeFormat.UPC_A,Z.BarcodeFormat.ITF,Z.BarcodeFormat.CODABAR,Z.BarcodeFormat.QR_CODE,Z.BarcodeFormat.DATA_MATRIX]);
+      zHints.set(Z.DecodeHintType.TRY_HARDER,true);
+      mode='zxing';
+    }
+  }
+
+  // Chrome / Edge / Samsung browser on Android: reads every barcode in the frame in one go
+  async function detectNative(){
+    const res=await detector.detect(vid);
+    return res.map(r=>{
+      const b=r.boundingBox, p=(r.cornerPoints||[]).map(q=>({x:q.x,y:q.y}));
+      return {text:String(r.rawValue||'').trim(), x:b?b.x+b.width/2:0, y:b?b.y+b.height/2:0, poly:p};
+    }).filter(c=>c.text);
+  }
+  // Compatibility mode (Safari, Firefox): cut the frame into overlapping horizontal strips and decode each one
+  function detectZX(){
+    const Z=window.ZXing, vw=vid.videoWidth, vh=vid.videoHeight;
+    const sc=Math.min(1,1600/vw), w=Math.round(vw*sc), h=Math.round(vh*sc);
+    fc.width=w; fc.height=h; fctx.drawImage(vid,0,0,w,h);
+    const bh=Math.round(h*0.26), step=Math.round(h*0.12), found=new Map();
+    for(let top=0;;top+=step){
+      const t=(top+bh>h)?h-bh:top;
+      bc.width=w; bc.height=bh; bctx.drawImage(fc,0,t,w,bh,0,0,w,bh);
+      try{
+        const bmp=new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(bc)));
+        const r=zReader.decode(bmp,zHints);
+        const text=(r.getText()||'').trim();
+        if(text && !found.has(text)){
+          const pts=r.getResultPoints()||[];
+          let x=w/2, y=bh/2;
+          if(pts.length){ x=pts.reduce((s,q)=>s+q.getX(),0)/pts.length; y=pts.reduce((s,q)=>s+q.getY(),0)/pts.length; }
+          found.set(text,{text,x:x/sc,y:(y+t)/sc,poly:pts.map(q=>({x:q.getX()/sc,y:(q.getY()+t)/sc}))});
+        }
+      }catch(e){ /* nothing in this strip */ }
+      if(t+bh>=h) break;
+    }
+    return [...found.values()];
+  }
+
+  function drawOverlay(list){
+    const W=vid.videoWidth, H=vid.videoHeight;
+    if(ov.width!==W||ov.height!==H){ ov.width=W; ov.height=H; }
+    octx.clearRect(0,0,W,H);
+    octx.lineWidth=Math.max(3,W/300); octx.strokeStyle='#3ddc84'; octx.fillStyle='#3ddc84';
+    octx.font='600 '+Math.round(W/38)+'px monospace';
+    list.forEach(c=>{
+      const p=c.poly||[];
+      if(p.length>=2){ octx.beginPath(); octx.moveTo(p[0].x,p[0].y); p.slice(1).forEach(q=>octx.lineTo(q.x,q.y)); if(p.length>2) octx.closePath(); octx.stroke(); }
+      else { octx.beginPath(); octx.arc(c.x,c.y,W/80,0,7); octx.fill(); }
+      octx.fillText(c.text,Math.max(6,Math.min(c.x-W/10,W-W/3)),Math.max(W/36,c.y-W/45));
+    });
+  }
+
+  function fit(){
+    const W=vid.videoWidth, H=vid.videoHeight; if(!W) return;
+    const maxW=$('#camWrap').clientWidth, maxH=Math.round(innerHeight*0.55);
+    const w=Math.min(maxW,maxH*W/H);
+    cam.style.maxHeight='none'; cam.style.aspectRatio='auto';
+    cam.style.width=w+'px'; cam.style.height=(w*H/W)+'px';
+  }
+  vid.addEventListener('loadedmetadata',fit);
+  addEventListener('resize',fit);
+  addEventListener('orientationchange',()=>setTimeout(fit,300));
+
+  async function tick(){
+    if(!running) return;
+    if(!busy && vid.readyState>=2 && vid.videoWidth){
+      busy=true;
+      try{
+        const list = mode==='native' ? await detectNative() : detectZX();
+        drawOverlay(list); handleCodes(list,vid.videoHeight);
+      }catch(e){}
+      busy=false;
+    }
+    timer=setTimeout(tick, mode==='native'?150:120);
+  }
+
   async function startCam(){
     if(running) return;
-    if(typeof Html5Qrcode==='undefined'){ toast('Scanner library did not load','bad'); return; }
-    scanner = scanner || new Html5Qrcode('reader',{
-      formatsToSupport:[
-        Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-        Html5QrcodeSupportedFormats.CODE_93, Html5QrcodeSupportedFormats.EAN_13,
-        Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A,
-        Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.CODABAR,
-        Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.DATA_MATRIX
-      ],
-      useBarCodeDetectorIfSupported:true, verbose:false
-    });
+    await initEngine();
+    if(!mode){ toast('No barcode reader could load. Check your internet.','bad'); return; }
     try{
-      await scanner.start({facingMode:'environment'},
-        {fps:12, qrbox:(w,h)=>({width:Math.floor(w*0.9),height:80}), aspectRatio:1.5},
-        onScan, ()=>{});
-      running=true;
+      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+      vid.srcObject=stream; await vid.play();
+      try{
+        const tr=stream.getVideoTracks()[0], caps=tr.getCapabilities&&tr.getCapabilities();
+        if(caps && caps.focusMode && caps.focusMode.includes('continuous')) await tr.applyConstraints({advanced:[{focusMode:'continuous'}]});
+      }catch(e){}
+      running=true; fit(); tick();
+      banner(READY,'All barcodes are read together');
+      if(mode==='zxing') toast('Compatibility reader in use. Chrome on Android is fastest.');
     }catch(e){
-      $('#pHint').textContent='The camera did not start. Allow camera permission in your browser and open this page over https. You can still type the codes by hand.';
+      $('#pHint').textContent='The camera did not start. Allow camera permission in your browser and open this page over https. You can still type the values by hand.';
       toast('Camera permission needed','bad');
     }
   }
-  async function stopCam(){ if(running){ try{ await scanner.stop(); }catch(e){} running=false; } }
+  function stopCam(){
+    running=false; clearTimeout(timer);
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    vid.srcObject=null; octx.clearRect(0,0,ov.width,ov.height);
+  }
   $('#pCam').onclick=()=>running?stopCam():startCam();
   document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopCam(); });
+  banner(READY,'All barcodes are read together');
   startCam();
   paint();
 }
