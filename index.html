@@ -129,6 +129,24 @@ tr.flash td{animation:flash 1.6s ease-out}
 .laser::after{content:"Put the red line on a barcode";position:absolute;left:50%;top:-26px;transform:translateX(-50%);background:rgba(0,0,0,.7);color:#fff;font:600 11px var(--sans);padding:3px 10px;border-radius:999px;white-space:nowrap;box-shadow:none}
 #cam.hit::after{content:"";position:absolute;inset:0;border:5px solid #3ddc84;pointer-events:none;animation:hitfade .6s ease-out forwards}
 @keyframes hitfade{0%{opacity:1}100%{opacity:0}}
+.xlpanel{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:14px;margin-bottom:16px}
+.xlbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px}
+.xlbar b{font-size:15px;margin-right:auto;overflow-wrap:anywhere}
+.xlbar select{padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:600 13px var(--sans)}
+.xlhint{color:var(--muted);font-size:13px;margin:0 0 10px;line-height:1.5}
+#xlStateWrap{font-size:12.5px;font-weight:700}
+#xlHead{overflow:hidden;border:1px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:var(--panel2)}
+#xlScroll{height:58vh;overflow:auto;border:1px solid var(--line);border-radius:0 0 12px 12px;background:var(--panel);outline:none;position:relative}
+#xlScroll:focus{border-color:var(--accent)}
+#xlSpacer{position:relative}
+.xlt{border-collapse:collapse;table-layout:fixed}
+.xlt td,.xlt th{height:30px;line-height:28px;width:150px;max-width:150px;border:1px solid var(--line);padding:0 8px;font:500 13px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
+.xlt th{background:var(--panel2);color:var(--muted);font-weight:700;text-align:center}
+.xlt td.rn,.xlt th.rn{width:56px;max-width:56px;text-align:center;color:var(--muted);background:var(--panel2)}
+.xlt td.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
+.xlt td.flashc{animation:flash 1s}
+.xlt td input{width:100%;height:26px;border:0;background:var(--panel);color:var(--text);font:inherit;outline:0;padding:0}
+.xlmode .stats,.xlmode .toolbar,.xlmode .sheet-card,.xlmode .dupbanner{display:none}
 .hint{color:var(--muted);font-size:13px;margin:10px 2px;line-height:1.5}
 .slots{display:grid;gap:10px;margin:12px 0}
 .slot{display:flex;align-items:center;gap:12px;background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:10px 12px;transition:.15s}
@@ -166,10 +184,25 @@ tr.flash td{animation:flash 1.6s ease-out}
     </div>
     <span class="chip"><span class="dot" id="dDot"></span><span id="dStatus">Connecting…</span></span>
     <button class="btn primary" id="btnQR">📱 Connect phone</button>
-    <button class="btn" id="btnXl" title="Type every scanned barcode straight into the Excel file open on this laptop">📗 Excel: OFF</button>
+    <button class="btn success" id="btnXl" title="Open your Excel file here. Every barcode scanned on the phone is written into it">📗 Open Excel file</button>
     <button class="btn" id="btnScannerMode">📷 I'm on the phone</button>
     <button class="icon-btn" id="btnTheme" title="Switch theme">🌓</button>
   </header>
+
+  <section id="xlPanel" class="xlpanel hidden">
+    <div class="xlbar">
+      <b id="xlName">file.xlsx</b>
+      <select id="xlSheetSel" title="Sheet"></select>
+      <span id="xlStateWrap"><span id="xlState"></span></span>
+      <button class="btn" id="xlSave">💾 Save now</button>
+      <button class="btn" id="xlDl">⬇ Download copy</button>
+      <button class="btn" id="xlOpenOther">📂 Open another file</button>
+      <button class="btn danger" id="xlClose">✕ Close file</button>
+    </div>
+    <p class="xlhint">Click the cell where the first barcode should go (it starts on the first empty row). Each scan fills the selected cell and moves <b>right</b>; a new device moves to the <b>next row</b>. You can also use the arrow keys, Enter, Tab and F2 or just type to change a cell. Changes are saved into your file by themselves. <b>Close the file in Excel while scanning</b>, otherwise it cannot be saved.</p>
+    <div id="xlHead"></div>
+    <div id="xlScroll" tabindex="0"><div id="xlSpacer"></div></div>
+  </section>
 
   <section class="stats">
     <div class="stat"><b id="sTotal">0</b><span>Total rows</span></div>
@@ -319,31 +352,217 @@ function initDesktop(){
   let phones = 0;
   const ridMap = {};   // phone row id -> sheet row id
 
-  /* ---------- Direct Excel: a small helper (xl-bridge) on this laptop types each scanned code into the open Excel file ---------- */
-  const XL_URL='http://127.0.0.1:8765', XL_KEY='sanchar-xl';
-  let xlOn=!!store.get('xlOn',false), xlOk=false, xlChain=Promise.resolve();
-  const xlPing=()=>fetch(XL_URL+'/ping?k='+XL_KEY,{mode:'no-cors',cache:'no-store'}).then(()=>true,()=>false);
-  function xlPaint(){
-    const b=$('#btnXl');
-    b.textContent = !xlOn ? '📗 Excel: OFF' : (xlOk ? '📗 Excel: ON ✔' : '📗 Excel: ON (helper not running)');
-    b.classList.toggle('success',xlOn&&xlOk);
+  /* ---------- Your Excel file, opened inside this page ----------
+     The page reads the .xlsx you pick, shows it as a grid, writes every scanned barcode into the selected cell
+     and saves the changes back into the same file on this laptop (Chrome / Edge). */
+  const RH=30, CW=150, RNW=56;
+  const xl={on:false,wb:null,ws:null,sheet:'',name:'',handle:null,r:0,c:0,startC:0,rowUsed:false,rows:60,cols:8,usedR:0,usedC:0,
+            dirty:false,saving:false,again:false,err:'',savedAt:null,editing:false};
+  const escH=t=>String(t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+  const colName=n=>{ let t=''; n++; while(n>0){ const m=(n-1)%26; t=String.fromCharCode(65+m)+t; n=Math.floor((n-1)/26); } return t; };
+  const addr=(r,c)=>XLSX.utils.encode_cell({r:r,c:c});
+  const xBox=()=>$('#xlScroll');
+
+  function cellText(r,c){ const x=xl.ws[addr(r,c)]; if(!x) return ''; return x.w!=null ? String(x.w) : (x.v==null ? '' : String(x.v)); }
+  function xlDims(){
+    let R=0,C=0;
+    if(xl.ws['!ref']){ const d=XLSX.utils.decode_range(xl.ws['!ref']); R=d.e.r+1; C=d.e.c+1; }
+    if(R===1 && C===1 && !xl.ws['A1']) R=0;           // empty sheet
+    xl.usedR=R; xl.usedC=C;
+    xl.rows=Math.max(R+40, xl.r+40, 60); xl.cols=Math.max(C+2, xl.c+3, 8);
   }
-  async function xlCheck(){ if(!xlOn) return; xlOk=await xlPing(); xlPaint(); }
-  $('#btnXl').onclick=async()=>{
-    xlOn=!xlOn; store.set('xlOn',xlOn);
-    if(xlOn){
-      xlOk=await xlPing();
-      if(xlOk) toast('Excel connected. Click the first cell in Excel and start scanning','ok');
-      else toast('Excel helper is not running. Double-click xl-bridge.bat first','bad');
+  function xlLayout(){
+    xlDims();
+    const W=RNW+xl.cols*CW;
+    $('#xlSpacer').style.height=(xl.rows*RH)+'px'; $('#xlSpacer').style.width=W+'px';
+    let h='<table class="xlt" style="width:'+W+'px"><tr><th class="rn"></th>';
+    for(let c=0;c<xl.cols;c++) h+='<th>'+colName(c)+'</th>';
+    $('#xlHead').innerHTML=h+'</tr></table>';
+    xlDraw();
+  }
+  function xlDraw(){
+    if(xl.editing || !xl.on) return;
+    const box=xBox(), top=box.scrollTop, vh=box.clientHeight||400;
+    const a=Math.max(0,Math.floor(top/RH)-8), b=Math.min(xl.rows,Math.ceil((top+vh)/RH)+8), W=RNW+xl.cols*CW;
+    const out=['<table class="xlt" style="position:absolute;left:0;top:'+(a*RH)+'px;width:'+W+'px">'];
+    for(let r=a;r<b;r++){
+      out.push('<tr><td class="rn">'+(r+1)+'</td>');
+      for(let c=0;c<xl.cols;c++) out.push('<td data-r="'+r+'" data-c="'+c+'"'+((r===xl.r&&c===xl.c)?' class="sel"':'')+'>'+escH(cellText(r,c))+'</td>');
+      out.push('</tr>');
     }
-    xlPaint();
-  };
-  function xlType(text){
-    if(!xlOn || !text) return;
-    xlChain=xlChain.then(()=>fetch(XL_URL+'/type?k='+XL_KEY,{method:'POST',mode:'no-cors',body:text}))
-      .catch(()=>{ xlOk=false; xlPaint(); toast('Excel helper not reachable. Is xl-bridge.bat running?','bad'); });
+    out.push('</table>');
+    $('#xlSpacer').innerHTML=out.join('');
   }
-  setInterval(xlCheck,4000); xlCheck(); xlPaint();
+  let drawRaf=0;
+  xBox().addEventListener('scroll',()=>{
+    $('#xlHead').scrollLeft=xBox().scrollLeft;
+    if(!drawRaf) drawRaf=requestAnimationFrame(()=>{ drawRaf=0; xlDraw(); });
+  });
+  function xlReveal(){
+    const box=xBox(), y=xl.r*RH, vh=box.clientHeight||400;
+    if(y<box.scrollTop || y+RH>box.scrollTop+vh) box.scrollTop=Math.max(0,y-Math.round(vh/2));
+    const x=RNW+xl.c*CW, vw=box.clientWidth||600;
+    if(x<box.scrollLeft+RNW) box.scrollLeft=Math.max(0,x-RNW);
+    else if(x+CW>box.scrollLeft+vw) box.scrollLeft=x+CW-vw;
+    $('#xlHead').scrollLeft=box.scrollLeft;
+    xlLayout();
+  }
+
+  /* ---- saving back into the file ---- */
+  let saveT=null, errToastT=0;
+  function xlState(){
+    const el=$('#xlState'); let t, bad=false;
+    if(xl.err){ t='⚠ Not saved: '+xl.err; bad=true; }
+    else if(!xl.handle){ t='This browser cannot save into the file. Use Download copy.'; bad=true; }
+    else if(xl.saving || xl.dirty){ t='Saving…'; }
+    else t='Saved ✔ '+(xl.savedAt?xl.savedAt.toLocaleTimeString():'');
+    el.textContent=t; el.style.color=bad?'var(--bad)':'var(--muted)';
+  }
+  function xlSaveSoon(){ xl.dirty=true; xlState(); clearTimeout(saveT); saveT=setTimeout(()=>xlSave(false),500); }
+  const xlBytes=()=>XLSX.write(xl.wb,{type:'array',bookType:'xlsx',cellStyles:true});
+  function xlDownload(){ download(new Blob([xlBytes()],{type:'application/octet-stream'}), xl.name.replace(/\.xlsx?$/i,'')+'.xlsx'); }
+  async function xlSave(manual){
+    if(!xl.on) return;
+    if(!xl.handle){ if(manual) xlDownload(); return; }
+    if(xl.saving){ xl.again=true; return; }
+    xl.saving=true; xl.err=''; xlState();
+    try{
+      const w=await xl.handle.createWritable();
+      await w.write(xlBytes()); await w.close();
+      xl.dirty=false; xl.savedAt=new Date();
+    }catch(e){
+      xl.err = /NoModification|lock|in use|being used|Invalid state/i.test((e.name||'')+' '+(e.message||''))
+        ? 'the file is open in Excel. Close it there, saving retries by itself'
+        : (e.message||String(e));
+    }
+    xl.saving=false; xlState();
+    if(xl.err){
+      if(Date.now()-errToastT>15000){ errToastT=Date.now(); toast('⚠ Could not save: '+xl.err,'bad'); }
+      clearTimeout(saveT); saveT=setTimeout(()=>xlSave(false),5000);
+    }else if(xl.again || xl.dirty){ xl.again=false; xlSaveSoon(); }
+    else if(manual) toast('Saved ✔','ok');
+  }
+  window.addEventListener('beforeunload',e=>{ if(xl.on && xl.dirty && xl.handle){ e.preventDefault(); e.returnValue=''; } });
+
+  /* ---- cells ---- */
+  function setCell(r,c,text,asNumber){
+    const a=addr(r,c);
+    if(text==='') delete xl.ws[a];
+    else if(asNumber && /^-?\d{1,11}(\.\d+)?$/.test(text)) xl.ws[a]={t:'n',v:+text};
+    else xl.ws[a]={t:'s',v:text};                         // text, so a long IMEI never turns into 8.65E+14
+    const ref=xl.ws['!ref']?XLSX.utils.decode_range(xl.ws['!ref']):{s:{r:0,c:0},e:{r:0,c:0}};
+    if(r>ref.e.r) ref.e.r=r; if(c>ref.e.c) ref.e.c=c;
+    xl.ws['!ref']=XLSX.utils.encode_range(ref);
+    xlSaveSoon();
+  }
+  function xlHas(v){
+    const nv=normV(v); if(!nv) return false;
+    for(const k in xl.ws){ if(k[0]==='!') continue; const x=xl.ws[k]; if(x && (normV(x.v)===nv || normV(x.w)===nv)) return true; }
+    return false;
+  }
+  function xlMove(dr,dc){
+    xl.r=Math.max(0,xl.r+dr); xl.c=Math.max(0,xl.c+dc);
+    if(dc!==0 && dr===0) xl.startC=xl.c;
+    xl.rowUsed=false; xlReveal();
+  }
+  function xlSelect(r,c){ xl.r=r; xl.c=c; xl.startC=c; xl.rowUsed=false; xlLayout(); xBox().focus(); }
+
+  /* a barcode arrives from the phone */
+  function xlScan(text,newDevice,from){
+    if(newDevice && xl.rowUsed){ xl.r++; xl.c=xl.startC; xl.rowUsed=false; }
+    const dup=xlHas(text);
+    setCell(xl.r,xl.c,text,false);
+    xl.rowUsed=true; const placed=addr(xl.r,xl.c); xl.c++;
+    xlReveal();
+    const cell=xBox().querySelector('td[data-r="'+Math.floor(XLSX.utils.decode_cell(placed).r)+'"][data-c="'+XLSX.utils.decode_cell(placed).c+'"]');
+    if(cell){ cell.classList.add('flashc'); }
+    beep(dup?300:1000, dup?300:80);
+    if(dup){ toast('⚠️ Already in the sheet: '+text,'bad'); try{ from.send({type:'xldup',text:text}); }catch(e){} }
+  }
+
+  /* ---- editing a cell by hand ---- */
+  function xlEdit(initial){
+    const td=xBox().querySelector('td.sel'); if(!td) return;
+    xl.editing=true;
+    const inp=document.createElement('input'); inp.value = initial!==undefined ? initial : cellText(xl.r,xl.c);
+    td.textContent=''; td.appendChild(inp); inp.focus();
+    if(initial===undefined) inp.select(); else inp.setSelectionRange(inp.value.length,inp.value.length);
+    const done=(commit,dr,dc)=>{
+      if(!xl.editing) return; xl.editing=false;
+      if(commit) setCell(xl.r,xl.c,inp.value.trim(),true);
+      xlDraw(); xBox().focus();
+      if(dr||dc) xlMove(dr,dc); else xlLayout();
+    };
+    inp.onkeydown=e=>{
+      if(e.key==='Enter'){ e.preventDefault(); done(true,1,0); }
+      else if(e.key==='Tab'){ e.preventDefault(); done(true,0,e.shiftKey?-1:1); }
+      else if(e.key==='Escape'){ e.preventDefault(); done(false); }
+    };
+    inp.onblur=()=>done(true);
+  }
+  xBox().addEventListener('click',e=>{
+    const td=e.target.closest('td[data-r]'); if(!td || xl.editing) return;
+    xlSelect(+td.dataset.r,+td.dataset.c);
+  });
+  xBox().addEventListener('dblclick',e=>{ if(e.target.closest('td[data-r]') && !xl.editing) xlEdit(); });
+  xBox().addEventListener('keydown',e=>{
+    if(xl.editing || !xl.on) return;
+    const k=e.key;
+    if(k==='ArrowDown'||k==='Enter'){ e.preventDefault(); xlMove(1,0); }
+    else if(k==='ArrowUp'){ e.preventDefault(); xlMove(-1,0); }
+    else if(k==='ArrowRight'||(k==='Tab'&&!e.shiftKey)){ e.preventDefault(); xlMove(0,1); }
+    else if(k==='ArrowLeft'||(k==='Tab'&&e.shiftKey)){ e.preventDefault(); xlMove(0,-1); }
+    else if(k==='F2'){ e.preventDefault(); xlEdit(); }
+    else if(k==='Delete'||k==='Backspace'){ e.preventDefault(); setCell(xl.r,xl.c,''); xlLayout(); }
+    else if(k.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey){ e.preventDefault(); xlEdit(k); }
+  });
+
+  /* ---- opening and closing the file ---- */
+  function xlUseSheet(name){
+    xl.sheet=name; xl.ws=xl.wb.Sheets[name];
+    xlDims();
+    xl.r=xl.usedR; xl.c=0; xl.startC=0; xl.rowUsed=false;      // start on the first empty row
+    xlLayout(); xBox().scrollTop=Math.max(0,xl.r*RH-RH*3); xlReveal();
+  }
+  async function xlOpen(){
+    if(xl.on){ await xlSave(false); }
+    let file, handle=null;
+    try{
+      if(window.showOpenFilePicker){
+        [handle]=await window.showOpenFilePicker({multiple:false,types:[{description:'Excel workbook (.xlsx)',accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}]});
+        try{ await handle.requestPermission({mode:'readwrite'}); }catch(e){}
+        file=await handle.getFile();
+      }else{
+        file=await new Promise(res=>{ const i=document.createElement('input'); i.type='file'; i.accept='.xlsx'; i.onchange=()=>res(i.files[0]); i.click(); });
+        if(!file) return;
+      }
+      const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellStyles:true});
+      if(!wb.SheetNames.length){ toast('This file has no sheet','bad'); return; }
+      xl.wb=wb; xl.name=file.name; xl.handle=handle; xl.err=''; xl.dirty=false; xl.savedAt=new Date(); xl.on=true;
+      $('#xlName').textContent='📗 '+file.name;
+      const sel=$('#xlSheetSel'); sel.innerHTML=''; wb.SheetNames.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+      sel.style.display = wb.SheetNames.length>1 ? '' : 'none';
+      $('#desktop').classList.add('xlmode'); $('#xlPanel').classList.remove('hidden');
+      xlUseSheet(wb.SheetNames[0]); xlState(); xBox().focus();
+      toast(handle?'Excel file opened. Scan on the phone, entries are saved into the file':'File opened (this browser cannot save into it, use Download copy)','ok');
+    }catch(e){
+      if(e && e.name==='AbortError') return;
+      toast('Could not open the file: '+(e.message||e),'bad');
+    }
+  }
+  async function xlCloseFile(){
+    if(xl.dirty && xl.handle){ await xlSave(false); if(xl.err && !confirm('The file could not be saved yet. Close anyway?')) return; }
+    else if(xl.dirty && !xl.handle && !confirm('You have changes that were not downloaded. Close anyway?')) return;
+    xl.on=false; xl.wb=null; xl.ws=null; xl.handle=null; clearTimeout(saveT);
+    $('#desktop').classList.remove('xlmode'); $('#xlPanel').classList.add('hidden');
+  }
+  $('#btnXl').onclick=xlOpen;
+  $('#xlOpenOther').onclick=xlOpen;
+  $('#xlClose').onclick=xlCloseFile;
+  $('#xlSave').onclick=()=>xlSave(true);
+  $('#xlDl').onclick=xlDownload;
+  $('#xlSheetSel').onchange=e=>xlUseSheet(e.target.value);
+  const ridSeen={};
   const save = () => store.set('rows', rows);
 
   /* Duplicate rules:
@@ -518,9 +737,14 @@ function initDesktop(){
       const gone=()=>{ conns.delete(c); phones=conns.size; refresh(); setStatus(true,phones?phones+' phone connected':'Ready, waiting for phone'); };
       c.on('close',gone); c.on('error',gone);
       c.on('data',msg=>{
-        if(msg && msg.type==='code'){ xlType(cleanCode(msg.text)); return; }
+        if(msg && msg.type==='code'){ if(xl.on){ const t=cleanCode(msg.text); if(t) xlScan(t,!!msg.nd,c); } return; }
         if(!msg || msg.type!=='row') return;
         const data={sn:cleanCode(msg.sn), i1:cleanCode(msg.i1), i2:cleanCode(msg.i2)};
+        if(xl.on){   // Excel file is open: the sheet is the Excel file, only confirm to the phone
+          const seen=!!ridSeen[msg.rid]; if(msg.rid) ridSeen[msg.rid]=data;
+          try{ c.send({type:'ack',rid:msg.rid,upd:seen,dup:[],sn:data.sn,i1:data.i1,i2:data.i2}); }catch(e){}
+          return;
+        }
         // the phone sends the row as soon as the first barcode is scanned, then sends it again (same rid) as more barcodes are scanned
         const ex=msg.rid ? rows.find(r=>r.id===ridMap[msg.rid]) : null;
         const d=dupSets(ex && ex.id);
@@ -549,6 +773,7 @@ function initDesktop(){
   function baseUrl(){
     const saved=store.get('baseUrl','');
     if(saved) return saved;
+    if(/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) return '';   // a phone cannot open the laptop-only address
     return /^https?:$/.test(location.protocol) ? location.href.split('#')[0] : '';
   }
   function loadQRLib(cb){
@@ -624,6 +849,7 @@ function initPhone(code){
           if(msg.dup && msg.dup.length){ toast('⚠️ Duplicate: '+msg.dup.join(', '),'bad'); buzz([200,80,200,80,200]); beep(300,350); }
           else toast(msg.upd?'✅ Sheet updated':'✅ Added to sheet','ok');
         }
+        else if(msg && msg.type==='xldup'){ toast('⚠️ Already in the Excel sheet: '+msg.text,'bad'); buzz([200,80,200,80,200]); beep(300,350); }
       });
       setTimeout(()=>{ if(conn && !conn.open){ try{conn.close();}catch(e){} } },8000);
     };
@@ -804,8 +1030,9 @@ function initPhone(code){
     slots[key].value=text; paint(); lastScanAt=now;
     hitFlash(); buzz(40); beep(1200,70);
     clearTimeout(sendTimer); sendTimer=null;
-    pushRow();                                                               // shows on the sheet at once
-    try{ if(conn && conn.open) conn.send({type:'code',text}); }catch(e){}     // also lets the laptop type it into Excel
+    const nd=!curRid;                                                        // first barcode of a new device
+    pushRow();
+    try{ if(conn && conn.open) conn.send({type:'code',text,nd}); }catch(e){}  // the laptop writes it into the Excel file
     const left=ORDER.filter(k=>!slots[k].value.trim());
     if(!left.length){
       banner('All 3 scanned ✔','Next label…');
