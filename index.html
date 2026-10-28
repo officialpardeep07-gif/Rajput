@@ -147,6 +147,31 @@ tr.flash td{animation:flash 1.6s ease-out}
 .xlt td.rng{background:var(--accent-soft);outline:1px solid var(--accent);outline-offset:-1px}
 .xlt td.flashc{animation:flash 1s}
 #xlScroll{user-select:none;-webkit-user-select:none}
+.ptabs{display:flex;gap:8px;margin-bottom:12px}
+.ptabs button{flex:1;padding:12px;border-radius:14px;border:2px solid var(--line);background:var(--panel);color:var(--text);font:700 14px var(--sans)}
+.ptabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+#pSheet{display:none}
+#phone.tabsheet #pScan{display:none}
+#phone.tabsheet #pSheet{display:block}
+.xsbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:13px}
+.xsbar b{font-weight:800}
+#xsState{color:var(--muted);font-size:12px;margin-right:auto}
+#xsSheet{max-width:45%;padding:6px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text)}
+.xsedit{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+#xsAddr{min-width:42px;text-align:center;font:800 13px var(--mono);background:var(--accent-soft);color:var(--accent);border-radius:8px;padding:8px 6px}
+#xsInput{flex:1;min-width:0;padding:11px 12px;border-radius:12px;border:2px solid var(--line);background:var(--panel);color:var(--text);font:600 15px var(--mono);outline:none}
+#xsInput:focus{border-color:var(--accent)}
+.xstools{display:flex;gap:6px;margin:8px 0}
+.xstools .btn{flex:1;justify-content:center;padding:10px 4px;font-size:13px}
+.xstools .btn:disabled{opacity:.4}
+.pgrid{height:50vh;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);-webkit-overflow-scrolling:touch;position:relative}
+.pgrid table{border-collapse:separate;border-spacing:0;font:13px var(--mono);min-width:100%}
+.pgrid th,.pgrid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:0 8px;height:34px;min-width:104px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.pgrid th{position:sticky;top:0;z-index:2;background:var(--panel2);color:var(--muted);text-align:center}
+.pgrid td.rn,.pgrid th.rn{position:sticky;left:0;z-index:1;min-width:44px;max-width:44px;text-align:center;background:var(--panel2);color:var(--muted)}
+.pgrid th.rn{z-index:3}
+.pgrid td.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
+.pgrid td.rng{background:var(--accent-soft)}
 .xlt td input{width:100%;height:26px;border:0;background:var(--panel);color:var(--text);font:inherit;outline:0;padding:0}
 .xlmode .stats,.xlmode .toolbar,.xlmode .sheet-card,.xlmode .dupbanner{display:none}
 .hint{color:var(--muted);font-size:13px;margin:10px 2px;line-height:1.5}
@@ -203,7 +228,7 @@ tr.flash td{animation:flash 1.6s ease-out}
       <button class="btn" id="xlNewOther">🆕 New file</button>
       <button class="btn danger" id="xlClose">✕ Close file</button>
     </div>
-    <p class="xlhint">Click the cell where the first barcode should go (it starts on the first empty row). Each scan fills the selected cell and moves <b>right</b>; a new device moves to the <b>next row</b>. You can also use the arrow keys, Enter, Tab and F2 or just type to change a cell. <b>Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Z, Ctrl+Y</b> work like in Excel; drag or Shift+arrows to select many cells. Changes are saved into your file by themselves. <b>Close the file in Excel while scanning</b>, otherwise it cannot be saved.</p>
+    <p class="xlhint">Click the cell where the first barcode should go (it starts on the first empty row). Each scan fills the selected cell and moves <b>right</b>; a new device moves to the <b>next row</b>. You can also use the arrow keys, Enter, Tab and F2 or just type to change a cell. <b>Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Z, Ctrl+Y</b> work like in Excel; drag or Shift+arrows to select many cells. The same sheet is also shown on the phone (<b>Excel sheet</b> tab) and can be edited from there. Changes are saved into your file by themselves. <b>Close the file in Excel while scanning</b>, otherwise it cannot be saved.</p>
     <div id="xlHead"></div>
     <div id="xlScroll" tabindex="0"><div id="xlSpacer"></div></div>
   </section>
@@ -274,6 +299,8 @@ tr.flash td{animation:flash 1.6s ease-out}
     <span class="chip"><span class="dot" id="pDot"></span><span id="pStatus">Connecting…</span></span>
     <button class="icon-btn" id="pTheme">🌓</button>
   </div>
+  <div class="ptabs"><button id="tabScan" class="on">📷 Scan</button><button id="tabSheet">📗 Excel sheet</button></div>
+  <div id="pScan">
   <div id="camWrap"><div id="cam"><video id="vid" playsinline muted autoplay></video><div class="laser"></div></div></div>
   <div class="step" id="stepBanner"></div>
   <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode. Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
@@ -290,6 +317,23 @@ tr.flash td{animation:flash 1.6s ease-out}
     <button class="btn" id="pCam">📷 Camera on / off</button>
   </div>
   <div class="recent"><h3>Recently sent</h3><div id="recent"></div></div>
+  </div>
+  <div id="pSheet">
+    <div class="xsbar"><b id="xsName">Excel sheet</b><span id="xsState"></span><select id="xsSheet" class="hidden"></select></div>
+    <p class="hint hidden" id="xsNone">No Excel file is open on the computer. Open or create one on the computer, and it shows up here.</p>
+    <div id="xsMain">
+      <div class="xsedit"><span id="xsAddr">A1</span><input id="xsInput" placeholder="Tap a cell, then type here" autocomplete="off" enterkeyhint="done"><button class="btn primary" id="xsOk">OK</button></div>
+      <div class="xstools">
+        <button class="btn" id="xsUndo">↶ Undo</button><button class="btn" id="xsRedo">↷ Redo</button>
+        <button class="btn" id="xsClear">🗑 Clear</button><button class="btn" id="xsNext">⏭ Next row</button>
+      </div>
+      <div class="pgrid" id="xsGrid"></div>
+      <div class="xstools">
+        <button class="btn" id="xsUp">▲ Earlier</button><button class="btn" id="xsFollow">🎯 Scan cell</button><button class="btn" id="xsDown">▼ Later</button>
+      </div>
+      <p class="hint">Tap a cell to choose it. The next scan goes into the chosen cell (on the computer too). Tap the chosen cell again or use the box on top to type. <b>Next row</b> starts a new device row and fills the number and name from the row above.</p>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -417,7 +461,7 @@ function initDesktop(){
     let h='<table class="xlt" style="width:'+W+'px"><tr><th class="rn"></th>';
     for(let c=0;c<xl.cols;c++) h+='<th>'+colName(c)+'</th>';
     $('#xlHead').innerHTML=h+'</tr></table>';
-    xlDraw();
+    xlDraw(); xlPushSoon();
   }
   function xlDraw(){
     if(xl.editing || !xl.on) return;
@@ -459,7 +503,7 @@ function initDesktop(){
     else if(!xl.handle){ t='This browser cannot save into the file. Use Download copy.'; bad=true; }
     else if(xl.saving || xl.dirty){ t='Saving…'; }
     else t='Saved ✔ '+(xl.savedAt?xl.savedAt.toLocaleTimeString():'');
-    el.textContent=t; el.style.color=bad?'var(--bad)':'var(--muted)';
+    el.textContent=t; el.style.color=bad?'var(--bad)':'var(--muted)'; xlPushSoon();
   }
   function xlSaveSoon(){ xl.dirty=true; xlState(); clearTimeout(saveT); saveT=setTimeout(()=>xlSave(false),500); }
   const xlBytes=()=>XLSX.write(xl.wb,{type:'array',bookType:'xlsx',cellStyles:true});
@@ -619,11 +663,77 @@ function initDesktop(){
     e.preventDefault(); e.clipboardData.setData('text/plain',rangeTSV()); xlClear();
   });
 
+
+  /* ---- show this sheet on the phone and let the phone control it ---- */
+  const XW=100;                                           // rows sent to the phone at a time
+  function xlSnap(c){
+    if(!xl.on || !xl.ws) return {type:'xlsnap',on:false};
+    xlDims();
+    const total=Math.max(xl.usedR, xl.r+1);
+    let top=(c && c._xv!=null) ? c._xv : Math.max(0,Math.floor(xl.r/50)*50-25);
+    top=Math.max(0,Math.min(top,Math.max(0,total-1)));
+    const end=Math.min(top+XW,total+3), C=Math.min(Math.max(xl.usedC,xl.c+1,xl.startC+3,4),26), data=[];
+    for(let r=top;r<end;r++){ const row=[]; for(let k=0;k<C;k++) row.push(cellText(r,k).slice(0,80)); data.push(row); }
+    return {type:'xlsnap',on:true,name:xl.name,sheets:xl.wb.SheetNames,sheet:xl.sheet,top:top,end:end,total:total,C:C,data:data,
+            r:xl.r,c:xl.c,ar:xl.ar,ac:xl.ac,state:$('#xlState').textContent,bad:!!(xl.err||!xl.handle),
+            canUndo:hist.u.length>0,canRedo:hist.r.length>0,follow:!(c&&c._xv!=null)};
+  }
+  let xpT=0;
+  function xlPushSoon(){
+    clearTimeout(xpT);
+    xpT=setTimeout(()=>{ try{ conns.forEach(c=>{ if(c.open) c.send(xlSnap(c)); }); }catch(e){} },120);
+  }
+  function xlPushTo(c){ try{ if(c.open) c.send(xlSnap(c)); }catch(e){} }
+  // commands coming from the phone
+  function xlRemote(m,c){
+    const num=(v,max)=>Number.isInteger(v)&&v>=0&&v<max;
+    if(m.op==='view'){ c._xv=(m.top==null)?null:Math.max(0,Math.floor(+m.top)||0); xlPushTo(c); return; }
+    if(!xl.on || !xl.ws) { xlPushTo(c); return; }
+    if(m.op==='sel' && num(m.r,100000) && num(m.c,200)){
+      xl.r=m.r; xl.c=m.c; xl.ar=m.r; xl.ac=m.c; xl.startC=m.c; xl.rowUsed=false; c._xv=null; xlReveal();
+    }else if(m.op==='set' && num(m.r,100000) && num(m.c,200)){
+      setCell(m.r,m.c,String(m.text==null?'':m.text).slice(0,500).trim(),true); xlLayout();
+    }else if(m.op==='clear' && num(m.r,100000) && num(m.c,200)){
+      if(xl.ws[addr(m.r,m.c)]) setCell(m.r,m.c,''); xlLayout();
+    }else if(m.op==='undo'){ xlUndo();
+    }else if(m.op==='redo'){ xlRedo();
+    }else if(m.op==='nextrow'){
+      xl.r=xl.r+1; xl.c=xl.startC; xl.ar=xl.r; xl.ac=xl.c; xl.rowUsed=false; c._xv=null;
+      xlGroup(()=>xlAutoFill(xl.r)); xlReveal();
+    }else if(m.op==='sheet' && xl.wb.SheetNames.includes(m.name)){
+      $('#xlSheetSel').value=m.name; xlUseSheet(m.name);
+    }
+  }
+
   /* a barcode arrives from the phone */
+  /* new device = new row: columns left of the scan columns are filled from the row above.
+     numbers count up (1,2,3...), names / text are repeated. Only empty cells are filled. */
+  const numOf=x=>{ if(!x) return null; if(x.t==='n' && typeof x.v==='number') return x.v; if(x.t==='s' && /^\d{1,9}$/.test(String(x.v).trim())) return +String(x.v).trim(); return null; };
+  function xlAutoFill(r){
+    if(r<1) return;
+    for(let c=0;c<xl.startC;c++){
+      if(xl.ws[addr(r,c)]) continue;                      // already typed, leave it
+      const up=xl.ws[addr(r-1,c)]; if(!up || up.v==null || String(up.v)==='') continue;
+      const n1=numOf(up);
+      if(n1!==null){
+        const n2=r>=2?numOf(xl.ws[addr(r-2,c)]):null;
+        const step=(n2!==null)?(n1-n2):1;                 // keeps the same step (1,2,3 or 5,10,15 or 7,7,7)
+        const nv=n1+step;
+        setCell(r,c,String(nv),true);
+        if(up.t==='s') xl.ws[addr(r,c)]={t:'s',v:String(nv)};
+      }else{
+        xl.ws[addr(r,c)]=cloneCell(up);                   // item name etc: same as above
+        histPush({r:r,c:c,o:undefined,n:cloneCell(xl.ws[addr(r,c)])});
+        const ref=XLSX.utils.decode_range(xl.ws['!ref']); if(c>ref.e.c){ ref.e.c=c; xl.ws['!ref']=XLSX.utils.encode_range(ref); }
+        xlSaveSoon();
+      }
+    }
+  }
   function xlScan(text,newDevice,from){
-    if(newDevice && xl.rowUsed){ xl.r++; xl.c=xl.startC; xl.rowUsed=false; }
+    let newRow=false;
+    if(newDevice && xl.rowUsed){ xl.r++; xl.c=xl.startC; xl.rowUsed=false; newRow=true; }
     const dup=xlHas(text);
-    setCell(xl.r,xl.c,text,false);
+    xlGroup(()=>{ if(newRow) xlAutoFill(xl.r); setCell(xl.r,xl.c,text,false); });
     xl.rowUsed=true; const placed=addr(xl.r,xl.c); xl.c++; xl.ar=xl.r; xl.ac=xl.c;
     xlReveal();
     const cell=xBox().querySelector('td[data-r="'+Math.floor(XLSX.utils.decode_cell(placed).r)+'"][data-c="'+XLSX.utils.decode_cell(placed).c+'"]');
@@ -747,7 +857,7 @@ function initDesktop(){
   async function xlCloseFile(){
     if(xl.dirty && xl.handle){ await xlSave(false); if(xl.err && !confirm('The file could not be saved yet. Close anyway?')) return; }
     else if(xl.dirty && !xl.handle && !confirm('You have changes that were not downloaded. Close anyway?')) return;
-    xl.on=false; xl.wb=null; xl.ws=null; xl.handle=null; clearTimeout(saveT);
+    xl.on=false; xl.wb=null; xl.ws=null; xl.handle=null; clearTimeout(saveT); xlPushSoon();
     $('#desktop').classList.remove('xlmode'); $('#xlPanel').classList.add('hidden');
   }
   $('#btnXl').onclick=xlOpen;
@@ -929,10 +1039,12 @@ function initDesktop(){
         setStatus(true,phones+(phones===1?' phone connected':' phones connected'));
         toast('📱 Phone connected','ok'); beep(880,120);
         $('#qrModal').classList.add('hidden');
+        xlPushTo(c);
       });
       const gone=()=>{ conns.delete(c); phones=conns.size; refresh(); setStatus(true,phones?phones+' phone connected':'Ready, waiting for phone'); };
       c.on('close',gone); c.on('error',gone);
       c.on('data',msg=>{
+        if(msg && msg.type==='xlcmd'){ try{ xlRemote(msg,c); }catch(e){} return; }
         if(msg && msg.type==='code'){ if(xl.on){ const t=cleanCode(msg.text); if(t) xlScan(t,!!msg.nd,c); } return; }
         if(!msg || msg.type!=='row') return;
         const data={sn:cleanCode(msg.sn), i1:cleanCode(msg.i1), i2:cleanCode(msg.i2)};
@@ -1045,6 +1157,7 @@ function initPhone(code){
           if(msg.dup && msg.dup.length){ toast('⚠️ Duplicate: '+msg.dup.join(', '),'bad'); buzz([200,80,200,80,200]); beep(300,350); }
           else toast(msg.upd?'✅ Sheet updated':'✅ Added to sheet','ok');
         }
+        else if(msg && msg.type==='xlsnap'){ onSnap(msg); }
         else if(msg && msg.type==='xldup'){ toast('⚠️ Already in the Excel sheet: '+msg.text,'bad'); buzz([200,80,200,80,200]); beep(300,350); }
       });
       setTimeout(()=>{ if(conn && !conn.open){ try{conn.close();}catch(e){} } },8000);
@@ -1052,6 +1165,97 @@ function initPhone(code){
     if(peer.open) go(); else peer.once('open',go);
   }
   setP(false,'Connecting…'); connect();
+
+  /* ---------- Excel sheet tab: see and control the computer's sheet ---------- */
+  let paused=false, snap=null, selKey='', inputDirty=false;
+  const colL=n=>{ let t=''; n++; while(n>0){ const m=(n-1)%26; t=String.fromCharCode(65+m)+t; n=Math.floor((n-1)/26); } return t; };
+  const xsSend=o=>{ if(conn && conn.open){ try{ conn.send(Object.assign({type:'xlcmd'},o)); }catch(e){} } else toast('Not connected to the sheet','bad'); };
+  function showTab(sheet){
+    $('#phone').classList.toggle('tabsheet',sheet);
+    $('#tabScan').classList.toggle('on',!sheet); $('#tabSheet').classList.toggle('on',sheet);
+    paused=sheet;                                          // no scanning while you look at the sheet
+    if(sheet){ if(snap) renderSheet(true); }
+    else fit();
+  }
+  $('#tabScan').onclick=()=>showTab(false);
+  $('#tabSheet').onclick=()=>showTab(true);
+
+  const cellAt=(r,c)=>{ if(!snap||!snap.data) return ''; const row=snap.data[r-snap.top]; return (row&&row[c])||''; };
+  function onSnap(m){
+    const prev=snap; snap=m;
+    if(!m.on){ renderSheet(false); return; }
+    const k=m.r+':'+m.c+':'+m.sheet;
+    const moved = k!==selKey; selKey=k;
+    if(moved){ inputDirty=false; }
+    renderSheet(moved && !(prev && prev.on===true && prev.r===m.r && prev.c===m.c && prev.sheet===m.sheet));
+  }
+  function renderSheet(jump){
+    const m=snap, on=!!(m&&m.on);
+    $('#xsNone').classList.toggle('hidden',on); $('#xsMain').classList.toggle('hidden',!on);
+    $('#xsName').textContent = on ? '📗 '+m.name : 'Excel sheet';
+    $('#xsState').textContent = on ? m.state : '';
+    $('#xsState').style.color = on&&m.bad ? 'var(--bad)' : '';
+    if(!on) return;
+    const sel=$('#xsSheet');
+    if(m.sheets.length>1){
+      sel.classList.remove('hidden');
+      if(sel.options.length!==m.sheets.length || sel.dataset.n!==m.sheets.join('|')){
+        sel.innerHTML=''; m.sheets.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); }); sel.dataset.n=m.sheets.join('|');
+      }
+      sel.value=m.sheet;
+    }else sel.classList.add('hidden');
+    $('#xsUndo').disabled=!m.canUndo; $('#xsRedo').disabled=!m.canRedo;
+    $('#xsAddr').textContent=colL(m.c)+(m.r+1);
+    const inp=$('#xsInput');
+    if(!inputDirty && document.activeElement!==inp) inp.value=cellAt(m.r,m.c);
+    else if(!inputDirty) inp.value=cellAt(m.r,m.c);
+    // grid
+    const g=$('#xsGrid'), st=g.scrollTop, sl=g.scrollLeft;
+    const R0=Math.min(m.ar,m.r), R1=Math.max(m.ar,m.r), C0=Math.min(m.ac,m.c), C1=Math.max(m.ac,m.c), multi=R1>R0||C1>C0;
+    let h='<table><tr><th class="rn"></th>';
+    for(let c=0;c<m.C;c++) h+='<th>'+colL(c)+'</th>';
+    h+='</tr>';
+    m.data.forEach((row,i)=>{
+      const r=m.top+i; h+='<tr><td class="rn">'+(r+1)+'</td>';
+      row.forEach((v,c)=>{
+        const cls=(r===m.r&&c===m.c)?' class="sel"':((multi&&r>=R0&&r<=R1&&c>=C0&&c<=C1)?' class="rng"':'');
+        h+='<td data-r="'+r+'" data-c="'+c+'"'+cls+'>'+v.replace(/[&<>"]/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[x]))+'</td>';
+      });
+      h+='</tr>';
+    });
+    g.innerHTML=h+'</table>';
+    g.scrollTop=st; g.scrollLeft=sl;
+    if(jump){
+      const td=g.querySelector('td.sel');
+      if(td){
+        g.scrollTop=Math.max(0,td.offsetTop-g.clientHeight/2+td.offsetHeight/2);
+        if(td.offsetLeft<g.scrollLeft+50 || td.offsetLeft+td.offsetWidth>g.scrollLeft+g.clientWidth) g.scrollLeft=Math.max(0,td.offsetLeft-g.clientWidth/2);
+      }
+    }
+  }
+  $('#xsGrid').addEventListener('click',e=>{
+    const td=e.target.closest('td[data-r]'); if(!td||!snap||!snap.on) return;
+    const r=+td.dataset.r, c=+td.dataset.c;
+    if(r===snap.r && c===snap.c){ const i=$('#xsInput'); i.focus(); i.select(); return; }    // tap the chosen cell again = edit
+    snap.r=r; snap.c=c; snap.ar=r; snap.ac=c; selKey=r+':'+c+':'+snap.sheet; inputDirty=false;
+    renderSheet(false); xsSend({op:'sel',r:r,c:c});
+  });
+  $('#xsInput').addEventListener('input',()=>{ inputDirty=true; });
+  function xsCommit(){
+    if(!snap||!snap.on) return;
+    xsSend({op:'set',r:snap.r,c:snap.c,text:$('#xsInput').value});
+    inputDirty=false; $('#xsInput').blur(); toast('✅ Saved in sheet','ok');
+  }
+  $('#xsOk').onclick=xsCommit;
+  $('#xsInput').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); xsCommit(); } });
+  $('#xsUndo').onclick=()=>xsSend({op:'undo'});
+  $('#xsRedo').onclick=()=>xsSend({op:'redo'});
+  $('#xsClear').onclick=()=>{ if(snap&&snap.on){ xsSend({op:'clear',r:snap.r,c:snap.c}); inputDirty=false; } };
+  $('#xsNext').onclick=()=>xsSend({op:'nextrow'});
+  $('#xsUp').onclick=()=>{ if(snap&&snap.on) xsSend({op:'view',top:Math.max(0,snap.top-50)}); };
+  $('#xsDown').onclick=()=>{ if(snap&&snap.on) xsSend({op:'view',top:snap.top+50}); };
+  $('#xsFollow').onclick=()=>{ xsSend({op:'view',top:null}); if(snap&&snap.on) setTimeout(()=>renderSheet(true),250); };
+  $('#xsSheet').onchange=e=>xsSend({op:'sheet',name:e.target.value});
 
   function renderRecent(){
     const box=$('#recent'); box.innerHTML='';
@@ -1239,7 +1443,7 @@ function initPhone(code){
   }
 
   async function scanOnce(){
-    if(busy || !running || !vid.videoWidth || vid.readyState<2) return;
+    if(paused || busy || !running || !vid.videoWidth || vid.readyState<2) return;
     busy=true;
     try{
       await initEngine();
