@@ -144,7 +144,9 @@ tr.flash td{animation:flash 1.6s ease-out}
 .xlt th{background:var(--panel2);color:var(--muted);font-weight:700;text-align:center}
 .xlt td.rn,.xlt th.rn{width:56px;max-width:56px;text-align:center;color:var(--muted);background:var(--panel2)}
 .xlt td.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
+.xlt td.rng{background:var(--accent-soft);outline:1px solid var(--accent);outline-offset:-1px}
 .xlt td.flashc{animation:flash 1s}
+#xlScroll{user-select:none;-webkit-user-select:none}
 .xlt td input{width:100%;height:26px;border:0;background:var(--panel);color:var(--text);font:inherit;outline:0;padding:0}
 .xlmode .stats,.xlmode .toolbar,.xlmode .sheet-card,.xlmode .dupbanner{display:none}
 .hint{color:var(--muted);font-size:13px;margin:10px 2px;line-height:1.5}
@@ -201,7 +203,7 @@ tr.flash td{animation:flash 1.6s ease-out}
       <button class="btn" id="xlNewOther">🆕 New file</button>
       <button class="btn danger" id="xlClose">✕ Close file</button>
     </div>
-    <p class="xlhint">Click the cell where the first barcode should go (it starts on the first empty row). Each scan fills the selected cell and moves <b>right</b>; a new device moves to the <b>next row</b>. You can also use the arrow keys, Enter, Tab and F2 or just type to change a cell. Changes are saved into your file by themselves. <b>Close the file in Excel while scanning</b>, otherwise it cannot be saved.</p>
+    <p class="xlhint">Click the cell where the first barcode should go (it starts on the first empty row). Each scan fills the selected cell and moves <b>right</b>; a new device moves to the <b>next row</b>. You can also use the arrow keys, Enter, Tab and F2 or just type to change a cell. <b>Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Z, Ctrl+Y</b> work like in Excel; drag or Shift+arrows to select many cells. Changes are saved into your file by themselves. <b>Close the file in Excel while scanning</b>, otherwise it cannot be saved.</p>
     <div id="xlHead"></div>
     <div id="xlScroll" tabindex="0"><div id="xlSpacer"></div></div>
   </section>
@@ -393,7 +395,8 @@ function initDesktop(){
      and saves the changes back into the same file on this laptop (Chrome / Edge). */
   const RH=30, CW=150, RNW=56;
   const xl={on:false,wb:null,ws:null,sheet:'',name:'',handle:null,r:0,c:0,startC:0,rowUsed:false,rows:60,cols:8,usedR:0,usedC:0,
-            dirty:false,saving:false,again:false,err:'',savedAt:null,editing:false};
+            dirty:false,saving:false,again:false,err:'',savedAt:null,editing:false,ar:0,ac:0};
+  const hist={u:[],r:[],grp:null};   // undo / redo history
   const escH=t=>String(t).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
   const colName=n=>{ let t=''; n++; while(n>0){ const m=(n-1)%26; t=String.fromCharCode(65+m)+t; n=Math.floor((n-1)/26); } return t; };
   const addr=(r,c)=>XLSX.utils.encode_cell({r:r,c:c});
@@ -421,9 +424,13 @@ function initDesktop(){
     const box=xBox(), top=box.scrollTop, vh=box.clientHeight||400;
     const a=Math.max(0,Math.floor(top/RH)-8), b=Math.min(xl.rows,Math.ceil((top+vh)/RH)+8), W=RNW+xl.cols*CW;
     const out=['<table class="xlt" style="position:absolute;left:0;top:'+(a*RH)+'px;width:'+W+'px">'];
+    const R=selRange(), multi=(R.r1>R.r0||R.c1>R.c0);
     for(let r=a;r<b;r++){
       out.push('<tr><td class="rn">'+(r+1)+'</td>');
-      for(let c=0;c<xl.cols;c++) out.push('<td data-r="'+r+'" data-c="'+c+'"'+((r===xl.r&&c===xl.c)?' class="sel"':'')+'>'+escH(cellText(r,c))+'</td>');
+      for(let c=0;c<xl.cols;c++){
+        const cls=(r===xl.r&&c===xl.c)?' class="sel"':((multi&&r>=R.r0&&r<=R.r1&&c>=R.c0&&c<=R.c1)?' class="rng"':'');
+        out.push('<td data-r="'+r+'" data-c="'+c+'"'+cls+'>'+escH(cellText(r,c))+'</td>');
+      }
       out.push('</tr>');
     }
     out.push('</table>');
@@ -481,14 +488,25 @@ function initDesktop(){
   window.addEventListener('beforeunload',e=>{ if(xl.on && xl.dirty && xl.handle){ e.preventDefault(); e.returnValue=''; } });
 
   /* ---- cells ---- */
+  const cloneCell=x=>x?Object.assign({},x):undefined;
+  function histPush(rec){
+    if(JSON.stringify(rec.o)===JSON.stringify(rec.n)) return;      // nothing changed
+    if(hist.grp){ hist.grp.push(rec); return; }
+    hist.u.push([rec]); hist.r.length=0; if(hist.u.length>300) hist.u.shift();
+  }
+  function xlGroup(fn){                                              // several cell changes = one undo step
+    hist.grp=[];
+    try{ fn(); } finally{ const g=hist.grp; hist.grp=null; if(g.length){ hist.u.push(g); hist.r.length=0; if(hist.u.length>300) hist.u.shift(); } }
+  }
   function setCell(r,c,text,asNumber){
-    const a=addr(r,c);
+    const a=addr(r,c), oldCell=cloneCell(xl.ws[a]);
     if(text==='') delete xl.ws[a];
     else if(asNumber && /^-?\d{1,11}(\.\d+)?$/.test(text)) xl.ws[a]={t:'n',v:+text};
     else xl.ws[a]={t:'s',v:text};                         // text, so a long IMEI never turns into 8.65E+14
     const ref=xl.ws['!ref']?XLSX.utils.decode_range(xl.ws['!ref']):{s:{r:0,c:0},e:{r:0,c:0}};
     if(r>ref.e.r) ref.e.r=r; if(c>ref.e.c) ref.e.c=c;
     xl.ws['!ref']=XLSX.utils.encode_range(ref);
+    histPush({r:r,c:c,o:oldCell,n:cloneCell(xl.ws[a])});
     xlSaveSoon();
   }
   function xlHas(v){
@@ -496,19 +514,117 @@ function initDesktop(){
     for(const k in xl.ws){ if(k[0]==='!') continue; const x=xl.ws[k]; if(x && (normV(x.v)===nv || normV(x.w)===nv)) return true; }
     return false;
   }
-  function xlMove(dr,dc){
+  function selRange(){ return {r0:Math.min(xl.ar,xl.r),r1:Math.max(xl.ar,xl.r),c0:Math.min(xl.ac,xl.c),c1:Math.max(xl.ac,xl.c)}; }
+  function xlMove(dr,dc,ext){
     xl.r=Math.max(0,xl.r+dr); xl.c=Math.max(0,xl.c+dc);
-    if(dc!==0 && dr===0) xl.startC=xl.c;
+    if(!ext){ xl.ar=xl.r; xl.ac=xl.c; if(dc!==0 && dr===0) xl.startC=xl.c; }
     xl.rowUsed=false; xlReveal();
   }
-  function xlSelect(r,c){ xl.r=r; xl.c=c; xl.startC=c; xl.rowUsed=false; xlLayout(); xBox().focus(); }
+  function xlSelect(r,c,ext){
+    xl.r=r; xl.c=c; if(!ext){ xl.ar=r; xl.ac=c; xl.startC=c; } xl.rowUsed=false; xlLayout(); xBox().focus();
+  }
+
+  /* ---- undo / redo ---- */
+  function applyRecs(recs,useNew){
+    recs.forEach(rec=>{
+      const a=addr(rec.r,rec.c), v=useNew?rec.n:rec.o;
+      if(v) xl.ws[a]=cloneCell(v); else delete xl.ws[a];
+      const ref=xl.ws['!ref']?XLSX.utils.decode_range(xl.ws['!ref']):{s:{r:0,c:0},e:{r:0,c:0}};
+      if(rec.r>ref.e.r) ref.e.r=rec.r; if(rec.c>ref.e.c) ref.e.c=rec.c;
+      xl.ws['!ref']=XLSX.utils.encode_range(ref);
+    });
+  }
+  function xlUndo(){
+    const g=hist.u.pop(); if(!g){ toast('Nothing to undo'); return; }
+    applyRecs(g.slice().reverse(),false); hist.r.push(g);
+    xl.r=g[0].r; xl.c=g[0].c; xl.ar=xl.r; xl.ac=xl.c; xl.startC=xl.c; xl.rowUsed=false;
+    xlSaveSoon(); xlReveal(); toast('↶ Undo');
+  }
+  function xlRedo(){
+    const g=hist.r.pop(); if(!g){ toast('Nothing to redo'); return; }
+    applyRecs(g,true); hist.u.push(g);
+    xl.r=g[0].r; xl.c=g[0].c; xl.ar=xl.r; xl.ac=xl.c; xl.startC=xl.c; xl.rowUsed=false;
+    xlSaveSoon(); xlReveal(); toast('↷ Redo');
+  }
+
+  /* ---- copy / cut / paste / clear ---- */
+  function tsvQuote(t){ return /[\t\n\r"]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; }
+  function rangeTSV(){
+    const R=selRange(), lines=[];
+    for(let r=R.r0;r<=R.r1;r++){ const row=[]; for(let c=R.c0;c<=R.c1;c++) row.push(tsvQuote(cellText(r,c))); lines.push(row.join('\t')); }
+    return lines.join('\r\n');
+  }
+  function parseTSV(t){
+    const rows=[]; let row=[], cur='', q=false;
+    for(let i=0;i<t.length;i++){
+      const ch=t[i];
+      if(q){ if(ch==='"'){ if(t[i+1]==='"'){ cur+='"'; i++; } else q=false; } else cur+=ch; }
+      else if(ch==='"' && cur===''){ q=true; }
+      else if(ch==='\t'){ row.push(cur); cur=''; }
+      else if(ch==='\n'||ch==='\r'){ if(ch==='\r'&&t[i+1]==='\n') i++; row.push(cur); rows.push(row); row=[]; cur=''; }
+      else cur+=ch;
+    }
+    if(cur!==''||row.length){ row.push(cur); rows.push(row); }
+    return rows;
+  }
+  function copyText(txt){
+    let ok=false;
+    try{
+      const ta=document.createElement('textarea'); ta.value=txt; ta.setAttribute('readonly','');
+      ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';
+      document.body.appendChild(ta); ta.select(); ok=document.execCommand('copy'); ta.remove();
+    }catch(e){}
+    if(!ok && navigator.clipboard){ try{ navigator.clipboard.writeText(txt); ok=true; }catch(e){} }
+    xBox().focus({preventScroll:true});
+    return ok;
+  }
+  function xlClear(){
+    const R=selRange();
+    xlGroup(()=>{ for(let r=R.r0;r<=R.r1;r++) for(let c=R.c0;c<=R.c1;c++) if(xl.ws[addr(r,c)]) setCell(r,c,''); });
+    xlLayout();
+  }
+  function xlCopy(cut){
+    const R=selRange(), n=(R.r1-R.r0+1)*(R.c1-R.c0+1);
+    if(!copyText(rangeTSV())){ toast('Copy not allowed in this browser','bad'); return; }
+    toast((cut?'✂ Cut ':'📋 Copied ')+n+(n===1?' cell':' cells'),'ok');
+    if(cut) xlClear();
+  }
+  function xlPaste(text){
+    if(!text && text!=='') return;
+    const rows=parseTSV(text); if(!rows.length) return;
+    const R=selRange(), r0=R.r0, c0=R.c0;
+    let maxC=0; rows.forEach(rw=>{ if(rw.length>maxC) maxC=rw.length; });
+    // one value copied + several cells selected = fill them all, like Excel
+    const fill = rows.length===1 && maxC===1 && (R.r1>R.r0||R.c1>R.c0);
+    xlGroup(()=>{
+      if(fill){ for(let r=R.r0;r<=R.r1;r++) for(let c=R.c0;c<=R.c1;c++) setCell(r,c,rows[0][0].trim(),true); }
+      else rows.forEach((rw,i)=>rw.forEach((v,j)=>setCell(r0+i,c0+j,v.trim(),true)));
+    });
+    if(!fill){ xl.ar=r0; xl.ac=c0; xl.r=r0+rows.length-1; xl.c=c0+maxC-1; }
+    xl.rowUsed=false; xlLayout();
+    toast('📥 Pasted','ok');
+  }
+  const xlFocused=()=>xl.on && !xl.editing && document.activeElement===xBox();
+  document.addEventListener('paste',e=>{
+    if(!xlFocused()) return;
+    e.preventDefault();
+    xlPaste((e.clipboardData||window.clipboardData).getData('text'));
+  });
+  document.addEventListener('copy',e=>{            // fallback if the browser sends the copy event itself
+    if(!xlFocused()) return;
+    e.preventDefault(); e.clipboardData.setData('text/plain',rangeTSV());
+  });
+  document.addEventListener('cut',e=>{
+    if(!xlFocused()) return;
+    e.preventDefault(); e.clipboardData.setData('text/plain',rangeTSV()); xlClear();
+  });
 
   /* a barcode arrives from the phone */
   function xlScan(text,newDevice,from){
     if(newDevice && xl.rowUsed){ xl.r++; xl.c=xl.startC; xl.rowUsed=false; }
     const dup=xlHas(text);
     setCell(xl.r,xl.c,text,false);
-    xl.rowUsed=true; const placed=addr(xl.r,xl.c); xl.c++;
+    xl.rowUsed=true; const placed=addr(xl.r,xl.c); xl.c++; xl.ar=xl.r; xl.ac=xl.c;
     xlReveal();
     const cell=xBox().querySelector('td[data-r="'+Math.floor(XLSX.utils.decode_cell(placed).r)+'"][data-c="'+XLSX.utils.decode_cell(placed).c+'"]');
     if(cell){ cell.classList.add('flashc'); }
@@ -536,28 +652,46 @@ function initDesktop(){
     };
     inp.onblur=()=>done(true);
   }
-  xBox().addEventListener('click',e=>{
-    const td=e.target.closest('td[data-r]'); if(!td || xl.editing) return;
-    xlSelect(+td.dataset.r,+td.dataset.c);
+  let dragging=false;
+  xBox().addEventListener('mousedown',e=>{
+    const td=e.target.closest('td[data-r]'); if(!td || xl.editing || e.button!==0) return;
+    xlSelect(+td.dataset.r,+td.dataset.c,e.shiftKey); dragging=true;
   });
+  xBox().addEventListener('mouseover',e=>{
+    if(!dragging) return;
+    if(!(e.buttons&1)){ dragging=false; return; }
+    const td=e.target.closest('td[data-r]'); if(!td) return;
+    const r=+td.dataset.r, c=+td.dataset.c; if(r===xl.r && c===xl.c) return;
+    xl.r=r; xl.c=c; xlDraw();
+  });
+  document.addEventListener('mouseup',()=>{ dragging=false; });
   xBox().addEventListener('dblclick',e=>{ if(e.target.closest('td[data-r]') && !xl.editing) xlEdit(); });
   xBox().addEventListener('keydown',e=>{
     if(xl.editing || !xl.on) return;
-    const k=e.key;
-    if(k==='ArrowDown'||k==='Enter'){ e.preventDefault(); xlMove(1,0); }
-    else if(k==='ArrowUp'){ e.preventDefault(); xlMove(-1,0); }
-    else if(k==='ArrowRight'||(k==='Tab'&&!e.shiftKey)){ e.preventDefault(); xlMove(0,1); }
-    else if(k==='ArrowLeft'||(k==='Tab'&&e.shiftKey)){ e.preventDefault(); xlMove(0,-1); }
+    const k=e.key, mod=e.ctrlKey||e.metaKey, kl=k.toLowerCase();
+    if(mod && !e.altKey){
+      if(kl==='z'){ e.preventDefault(); e.shiftKey?xlRedo():xlUndo(); }
+      else if(kl==='y'){ e.preventDefault(); xlRedo(); }
+      else if(kl==='c'){ e.preventDefault(); xlCopy(false); }
+      else if(kl==='x'){ e.preventDefault(); xlCopy(true); }
+      else if(kl==='a'){ e.preventDefault(); xl.ar=0; xl.ac=0; xl.r=Math.max(0,xl.usedR-1); xl.c=Math.max(0,xl.usedC-1); xlLayout(); }
+      // Ctrl+V is handled by the paste event
+      return;
+    }
+    if(k==='ArrowDown'||k==='Enter'){ e.preventDefault(); xlMove(1,0,k==='ArrowDown'&&e.shiftKey); }
+    else if(k==='ArrowUp'){ e.preventDefault(); xlMove(-1,0,e.shiftKey); }
+    else if(k==='ArrowRight'||(k==='Tab'&&!e.shiftKey)){ e.preventDefault(); xlMove(0,1,k==='ArrowRight'&&e.shiftKey); }
+    else if(k==='ArrowLeft'||(k==='Tab'&&e.shiftKey)){ e.preventDefault(); xlMove(0,-1,k==='ArrowLeft'&&e.shiftKey); }
     else if(k==='F2'){ e.preventDefault(); xlEdit(); }
-    else if(k==='Delete'||k==='Backspace'){ e.preventDefault(); setCell(xl.r,xl.c,''); xlLayout(); }
-    else if(k.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey){ e.preventDefault(); xlEdit(k); }
+    else if(k==='Delete'||k==='Backspace'){ e.preventDefault(); xlClear(); }
+    else if(k.length===1 && !e.altKey){ e.preventDefault(); xl.ar=xl.r; xl.ac=xl.c; xlEdit(k); }
   });
 
   /* ---- opening and closing the file ---- */
   function xlUseSheet(name){
     xl.sheet=name; xl.ws=xl.wb.Sheets[name];
     xlDims();
-    xl.r=xl.usedR; xl.c=0; xl.startC=0; xl.rowUsed=false;      // start on the first empty row
+    xl.r=xl.usedR; xl.c=0; xl.startC=0; xl.rowUsed=false; xl.ar=xl.r; xl.ac=0; hist.u=[]; hist.r=[];      // start on the first empty row
     xlLayout(); xBox().scrollTop=Math.max(0,xl.r*RH-RH*3); xlReveal();
   }
   function xlAttach(wb,name,handle,msg){
