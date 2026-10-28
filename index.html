@@ -171,6 +171,13 @@ tr.flash td{animation:flash 1.6s ease-out}
 .pgrid td.rn,.pgrid th.rn{position:sticky;left:0;z-index:1;min-width:44px;max-width:44px;text-align:center;background:var(--panel2);color:var(--muted)}
 .pgrid th.rn{z-index:3}
 .pgrid td.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
+.holdbox{position:absolute;left:6%;right:6%;bottom:12px;padding:8px 12px;border-radius:14px;background:rgba(0,0,0,.72);color:#fff;pointer-events:none;display:none}
+.holdbox.on{display:block}
+.holdbox .ht{display:flex;justify-content:space-between;gap:10px;font:700 12px var(--sans);margin-bottom:6px}
+.holdbox .ht b{font:800 13px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.holdbox .hb{height:8px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden}
+.holdbox .hb i{display:block;height:100%;width:0;background:#3ddc84;border-radius:99px}
+#pHold{padding:12px 8px;border-radius:14px;border:2px solid var(--line);background:var(--panel);color:var(--text);font:700 13px var(--sans)}
 .pgrid td.rng{background:var(--accent-soft)}
 .pgrid td.last{background:var(--ok-soft);box-shadow:inset 0 0 0 2px var(--ok);font-weight:700}
 #xsMini{height:30vh;margin:6px 0 10px}
@@ -307,11 +314,11 @@ tr.flash td{animation:flash 1.6s ease-out}
   </div>
   <div class="ptabs"><button id="tabScan" class="on">📷 Scan</button><button id="tabSheet">📗 Excel sheet</button></div>
   <div id="pScan">
-  <div id="camWrap"><div id="cam"><video id="vid" playsinline muted autoplay></video><div class="laser"></div></div></div>
+  <div id="camWrap"><div id="cam"><video id="vid" playsinline muted autoplay></video><div class="laser"></div><div class="holdbox" id="holdBox"><div class="ht"><span id="holdMsg">Hold…</span><b id="holdTxt"></b></div><div class="hb"><i id="holdFill"></i></div></div></div></div>
   <div class="step" id="stepBanner"></div>
   <div id="xsLastBar" class="hidden"><span>Last scanned</span><b id="xsLastTxt">-</b><small id="xsLastAt"></small></div>
   <div class="pgrid hidden" id="xsMini"></div>
-  <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode. Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
+  <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode and <b>hold it there for 3 seconds</b> (a green bar fills up; if the line moves to another barcode it starts again, so a wrong barcode is never scanned in a hurry). Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
   <div class="slots">
     <div class="slot" data-k="sn"><span class="lab">S/N</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
     <div class="slot" data-k="i1"><span class="lab">IMEI1</span><input id="f_i1" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
@@ -323,6 +330,7 @@ tr.flash td{animation:flash 1.6s ease-out}
   </div>
   <div class="phone-actions" style="margin-top:10px">
     <button class="btn" id="pCam">📷 Camera on / off</button>
+    <select id="pHold" title="How long to hold the red line on a barcode"><option value="0">Hold: instant</option><option value="1000">Hold: 1 sec</option><option value="2000">Hold: 2 sec</option><option value="3000">Hold: 3 sec</option><option value="4000">Hold: 4 sec</option><option value="5000">Hold: 5 sec</option></select>
   </div>
   <div class="recent"><h3>Recently sent</h3><div id="recent"></div></div>
   </div>
@@ -1187,6 +1195,7 @@ function initPhone(code){
     $('#phone').classList.toggle('tabsheet',sheet);
     $('#tabScan').classList.toggle('on',!sheet); $('#tabSheet').classList.toggle('on',sheet);
     paused=sheet;                                          // no scanning while you look at the sheet
+    if(sheet) holdReset();
     if(sheet){ if(snap) renderSheet(true); }
     else fit();
   }
@@ -1309,7 +1318,32 @@ function initPhone(code){
     s.querySelector('button').onclick=()=>{ slots[k].value=''; paint(); };
     slots[k].addEventListener('input',paint);
   });
-  const READY='Put the red line on a barcode', READY_SUB='It is scanned as soon as the line is on it';
+  let HOLD_MS=+store.get('holdMs',3000); if(![0,1000,2000,3000,4000,5000].includes(HOLD_MS)) HOLD_MS=3000;
+  const READY='Put the red line on a barcode';
+  let READY_SUB='';
+  const holdSub=()=>HOLD_MS?('Hold the red line on it for '+(HOLD_MS/1000)+' seconds'):'It is scanned as soon as the line is on it';
+  READY_SUB=holdSub();
+  $('#pHold').value=String(HOLD_MS);
+  $('#pHold').onchange=e=>{ HOLD_MS=+e.target.value; store.set('holdMs',HOLD_MS); READY_SUB=holdSub(); holdReset(); banner(READY,READY_SUB); toast(HOLD_MS?'Hold time: '+(HOLD_MS/1000)+' sec':'Instant scan','ok'); };
+  /* hold-to-scan: the same barcode must stay under the red line for HOLD_MS before it is accepted */
+  let hold={text:'',start:0,last:0};
+  function holdShow(p,text){
+    const b=$('#holdBox'); b.classList.add('on');
+    $('#holdFill').style.width=Math.min(100,Math.round(p*100))+'%';
+    $('#holdTxt').textContent=text;
+    $('#holdMsg').textContent='Keep it steady… '+Math.max(0,(HOLD_MS*(1-p)/1000)).toFixed(1)+'s';
+  }
+  function holdReset(){ hold={text:'',start:0,last:0}; const b=$('#holdBox'); if(b) b.classList.remove('on'); }
+  function holdFeed(text){
+    const now=Date.now();
+    if(!HOLD_MS){ if(text) accept(text); return; }
+    if(!text){ if(hold.text && now-hold.last>700) holdReset(); return; }      // line left the barcode
+    if((cool[text] && cool[text]>now) || Object.values(slots).some(i=>i.value.trim()===text)){ holdReset(); return; }
+    if(text!==hold.text || now-hold.last>700){ hold={text:text,start:now,last:now}; holdShow(0,text); return; }   // new barcode: start counting from zero
+    hold.last=now;
+    const p=(now-hold.start)/HOLD_MS;
+    if(p>=1){ holdReset(); accept(text); } else holdShow(p,text);
+  }
   const cool={};   // codes just sent: ignored for a moment so they are not scanned twice
   function clearSlots(){
     clearTimeout(sendTimer); sendTimer=null;
@@ -1480,7 +1514,7 @@ function initPhone(code){
       await initEngine();
       if(!mode){ if(!engineWarned){ engineWarned=true; toast('No barcode reader could load. Check your internet.','bad'); } return; }
       const text=await readLine();
-      if(text) accept(text);
+      holdFeed(text);
     }catch(e){}
     finally{ busy=false; }
   }
@@ -1519,6 +1553,7 @@ function initPhone(code){
     }
   }
   function stopCam(){
+    holdReset();
     running=false; clearTimeout(timer);
     if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
     vid.srcObject=null;
