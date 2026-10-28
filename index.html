@@ -173,7 +173,7 @@ tr.flash td{animation:flash 1.6s ease-out}
 .pgrid td.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
 .holdbox{position:absolute;left:6%;right:6%;bottom:12px;padding:8px 12px;border-radius:14px;background:rgba(0,0,0,.72);color:#fff;pointer-events:none;display:none}
 .holdbox.on{display:block}
-.holdbox .ht{display:flex;justify-content:space-between;gap:10px;font:700 12px var(--sans);margin-bottom:6px}
+.holdbox .ht{display:flex;justify-content:space-between;align-items:center;gap:10px;font:800 22px var(--sans);margin-bottom:6px}
 .holdbox .ht b{font:800 13px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .holdbox .hb{height:8px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden}
 .holdbox .hb i{display:block;height:100%;width:0;background:#3ddc84;border-radius:99px}
@@ -318,7 +318,7 @@ tr.flash td{animation:flash 1.6s ease-out}
   <div class="step" id="stepBanner"></div>
   <div id="xsLastBar" class="hidden"><span>Last scanned</span><b id="xsLastTxt">-</b><small id="xsLastAt"></small></div>
   <div class="pgrid hidden" id="xsMini"></div>
-  <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode and <b>hold it there for 1.5 seconds</b> (a green bar fills up; if the line moves to another barcode it starts again, so a wrong barcode is never scanned in a hurry). Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
+  <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode and <b>hold it there for 1.5 seconds</b> (a green bar fills up and counts 2, 1; if the line moves to another barcode it starts again, so a wrong barcode is never scanned in a hurry). Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
   <div class="slots">
     <div class="slot" data-k="sn"><span class="lab">S/N</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
     <div class="slot" data-k="i1"><span class="lab">IMEI1</span><input id="f_i1" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
@@ -1331,7 +1331,7 @@ function initPhone(code){
     const b=$('#holdBox'); b.classList.add('on');
     $('#holdFill').style.width=Math.min(100,Math.round(p*100))+'%';
     $('#holdTxt').textContent=text;
-    $('#holdMsg').textContent='Keep it steady… '+Math.max(0,(HOLD_MS*(1-p)/1000)).toFixed(1)+'s';
+    $('#holdMsg').textContent='Hold… '+Math.max(1,Math.ceil(HOLD_MS*(1-p)/1000));          // shows 2, then 1, then it scans
   }
   function holdReset(){ hold={text:'',start:0,last:0}; const b=$('#holdBox'); if(b) b.classList.remove('on'); }
   function holdFeed(text){
