@@ -185,6 +185,7 @@ tr.flash td{animation:flash 1.6s ease-out}
     <span class="chip"><span class="dot" id="dDot"></span><span id="dStatus">Connecting…</span></span>
     <button class="btn primary" id="btnQR">📱 Connect phone</button>
     <button class="btn success" id="btnXl" title="Open your Excel file here. Every barcode scanned on the phone is written into it">📗 Open Excel file</button>
+    <button class="btn" id="btnXlNew" title="Create a brand new Excel file and scan straight into it">🆕 New Excel file</button>
     <button class="btn" id="btnScannerMode">📷 I'm on the phone</button>
     <button class="icon-btn" id="btnTheme" title="Switch theme">🌓</button>
   </header>
@@ -197,6 +198,7 @@ tr.flash td{animation:flash 1.6s ease-out}
       <button class="btn" id="xlSave">💾 Save now</button>
       <button class="btn" id="xlDl">⬇ Download copy</button>
       <button class="btn" id="xlOpenOther">📂 Open another file</button>
+      <button class="btn" id="xlNewOther">🆕 New file</button>
       <button class="btn danger" id="xlClose">✕ Close file</button>
     </div>
     <p class="xlhint">Click the cell where the first barcode should go (it starts on the first empty row). Each scan fills the selected cell and moves <b>right</b>; a new device moves to the <b>next row</b>. You can also use the arrow keys, Enter, Tab and F2 or just type to change a cell. Changes are saved into your file by themselves. <b>Close the file in Excel while scanning</b>, otherwise it cannot be saved.</p>
@@ -524,6 +526,36 @@ function initDesktop(){
     xl.r=xl.usedR; xl.c=0; xl.startC=0; xl.rowUsed=false;      // start on the first empty row
     xlLayout(); xBox().scrollTop=Math.max(0,xl.r*RH-RH*3); xlReveal();
   }
+  function xlAttach(wb,name,handle,msg){
+    xl.wb=wb; xl.name=name; xl.handle=handle; xl.err=''; xl.dirty=false; xl.savedAt=new Date(); xl.on=true;
+    $('#xlName').textContent='📗 '+name;
+    const sel=$('#xlSheetSel'); sel.innerHTML=''; wb.SheetNames.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+    sel.style.display = wb.SheetNames.length>1 ? '' : 'none';
+    $('#desktop').classList.add('xlmode'); $('#xlPanel').classList.remove('hidden');
+    xlUseSheet(wb.SheetNames[0]); xlState(); xBox().focus();
+    toast(msg,'ok');
+  }
+  // brand new, empty Excel file
+  async function xlNew(){
+    if(xl.on){ await xlSave(false); }
+    try{
+      let handle=null, name='scan-sheet-'+stamp()+'.xlsx';
+      if(window.showSaveFilePicker){
+        handle=await window.showSaveFilePicker({suggestedName:name,types:[{description:'Excel workbook (.xlsx)',accept:{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':['.xlsx']}}]});
+        name=handle.name;
+      }else{
+        const n=prompt('Name for the new Excel file',name.replace(/\.xlsx$/i,'')); if(!n) return;
+        name=n.trim().replace(/\.xlsx$/i,'')+'.xlsx';
+      }
+      const wb=XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([[]]),'Sheet1');
+      xlAttach(wb,name,handle,handle?'New Excel file created. Scan on the phone, entries are saved into it':'New sheet ready (this browser cannot save into a file, use Download copy)');
+      if(handle) await xlSave(false);                       // create the file on the disk right away
+    }catch(e){
+      if(e && e.name==='AbortError') return;
+      toast('Could not create the file: '+(e.message||e),'bad');
+    }
+  }
   async function xlOpen(){
     if(xl.on){ await xlSave(false); }
     let file, handle=null;
@@ -538,13 +570,7 @@ function initDesktop(){
       }
       const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellStyles:true});
       if(!wb.SheetNames.length){ toast('This file has no sheet','bad'); return; }
-      xl.wb=wb; xl.name=file.name; xl.handle=handle; xl.err=''; xl.dirty=false; xl.savedAt=new Date(); xl.on=true;
-      $('#xlName').textContent='📗 '+file.name;
-      const sel=$('#xlSheetSel'); sel.innerHTML=''; wb.SheetNames.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
-      sel.style.display = wb.SheetNames.length>1 ? '' : 'none';
-      $('#desktop').classList.add('xlmode'); $('#xlPanel').classList.remove('hidden');
-      xlUseSheet(wb.SheetNames[0]); xlState(); xBox().focus();
-      toast(handle?'Excel file opened. Scan on the phone, entries are saved into the file':'File opened (this browser cannot save into it, use Download copy)','ok');
+      xlAttach(wb,file.name,handle,handle?'Excel file opened. Scan on the phone, entries are saved into the file':'File opened (this browser cannot save into it, use Download copy)');
     }catch(e){
       if(e && e.name==='AbortError') return;
       toast('Could not open the file: '+(e.message||e),'bad');
@@ -557,6 +583,8 @@ function initDesktop(){
     $('#desktop').classList.remove('xlmode'); $('#xlPanel').classList.add('hidden');
   }
   $('#btnXl').onclick=xlOpen;
+  $('#btnXlNew').onclick=xlNew;
+  $('#xlNewOther').onclick=xlNew;
   $('#xlOpenOther').onclick=xlOpen;
   $('#xlClose').onclick=xlCloseFile;
   $('#xlSave').onclick=()=>xlSave(true);
