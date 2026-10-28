@@ -318,13 +318,47 @@ function toast(msg,type){
   const t=$('#toast'); t.textContent=msg; t.className='show '+(type||'');
   clearTimeout(toastT); toastT=setTimeout(()=>t.className='',2600);
 }
-let actx;
+let actx, audioUnlocked=false, silentEl=null;
+/* Phones block sound until the user touches the page once, so unlock audio on the first touch/click */
+function unlockAudio(){
+  try{
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    if(actx.state!=='running') actx.resume();
+    // tiny silent tone: fully wakes the audio engine on iOS/Android
+    const o=actx.createOscillator(), g=actx.createGain(); g.gain.value=0.0001;
+    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime+0.03);
+  }catch(e){}
+  // iPhone: Web Audio is muted by the silent switch; a silent <audio> makes it play like a media sound
+  try{
+    if(!silentEl){
+      silentEl=document.createElement('audio'); silentEl.setAttribute('playsinline',''); silentEl.loop=true;
+      const n=800, b=new Uint8Array(44+n); const w=(i,v,l)=>{for(let k=0;k<l;k++)b[i+k]=(v>>(8*k))&255;};
+      [82,73,70,70].forEach((c,i)=>b[i]=c); w(4,36+n,4); [87,65,86,69,102,109,116,32].forEach((c,i)=>b[8+i]=c);
+      w(16,16,4); w(20,1,2); w(22,1,2); w(24,8000,4); w(28,8000,4); w(32,1,2); w(34,8,2);
+      [100,97,116,97].forEach((c,i)=>b[36+i]=c); w(40,n,4); for(let i=0;i<n;i++) b[44+i]=128;
+      silentEl.src=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));
+    }
+    silentEl.play().catch(()=>{});
+  }catch(e){}
+  audioUnlocked=true;
+}
+['touchstart','touchend','pointerdown','click','keydown'].forEach(ev=>document.addEventListener(ev,unlockAudio,{passive:true}));
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden && actx && actx.state!=='running') actx.resume().catch(()=>{}); });
+
 function beep(freq,dur){
   try{
     actx = actx || new (window.AudioContext||window.webkitAudioContext)();
-    const o=actx.createOscillator(), g=actx.createGain();
-    o.frequency.value=freq; o.type='sine'; g.gain.value=.12;
-    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime+dur/1000);
+    const play=()=>{
+      const t=actx.currentTime, d=dur/1000;
+      const o=actx.createOscillator(), g=actx.createGain();
+      o.type='square'; o.frequency.value=freq;            // square wave = loud scanner-style "beep"
+      g.gain.setValueAtTime(0.0001,t);
+      g.gain.exponentialRampToValueAtTime(0.35,t+0.01);
+      g.gain.setValueAtTime(0.35,t+Math.max(0.011,d-0.02));
+      g.gain.exponentialRampToValueAtTime(0.0001,t+d);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t+d+0.02);
+    };
+    if(actx.state==='running') play(); else actx.resume().then(play).catch(()=>{});
   }catch(e){}
 }
 const buzz = p => { try{ navigator.vibrate && navigator.vibrate(p);}catch(e){} };
@@ -1056,7 +1090,7 @@ function initPhone(code){
     let key=pickSlot(text);
     if(!key){ finishRow('Next device'); key=pickSlot(text); }                // box already taken: this barcode belongs to a new device
     slots[key].value=text; paint(); lastScanAt=now;
-    hitFlash(); buzz(40); beep(1200,70);
+    hitFlash(); buzz(60); beep(1800,140);
     clearTimeout(sendTimer); sendTimer=null;
     const nd=!curRid;                                                        // first barcode of a new device
     pushRow();
