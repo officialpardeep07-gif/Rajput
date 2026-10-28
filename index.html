@@ -630,7 +630,7 @@ function initPhone(code){
     conn.send({type:'row',sn,i1,i2});
     thumbQ.push(pendingThumb); pendingThumb='';
     clearSlots();
-    freezeC.style.display='block'; setTimeout(hideFreeze,1000); // keep the photo visible for a moment
+    freezeC.style.display='block'; setTimeout(hideFreeze,700); // keep the photo visible for a moment
     banner('Sent ✔','Move the label away, then show the next one');
   }
   $('#pSend').onclick=send;
@@ -679,13 +679,12 @@ function initPhone(code){
     const x=r.getContext('2d'); x.translate(r.width/2,r.height/2); x.rotate(deg*Math.PI/180); x.drawImage(c,-c.width/2,-c.height/2);
     return r;
   }
-  const pause=()=>new Promise(r=>setTimeout(r,20));
-  async function decodeAll(canvas){
+  async function decodeAll(canvas,thorough){
     const out=new Map();
     if(detector){ try{ (await detectNative(canvas)).forEach(c=>out.set(c.text,c)); }catch(e){} }
     if(zReader && (!detector || out.size<3)){
-      await pause();
-      try{ detectZX(canvas,canvas.width,canvas.height,{maxW:2400,bhR:0.09,stepR:0.035}).forEach(c=>{ if(!out.has(c.text)) out.set(c.text,c); }); }catch(e){}
+      const opt = thorough ? {maxW:2400,bhR:0.09,stepR:0.035} : {maxW:1280,bhR:0.12,stepR:0.06};
+      try{ detectZX(canvas,canvas.width,canvas.height,opt).forEach(c=>{ if(!out.has(c.text)) out.set(c.text,c); }); }catch(e){}
     }
     return [...out.values()];
   }
@@ -695,68 +694,74 @@ function initPhone(code){
     return await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=URL.createObjectURL(blob); });
   }
 
-  async function processPhoto(src){
-    if(ocrBusy) return;
+  function noBarcode(work){
+    if(work) paintFreeze(work,[]);
+    banner('No barcode found','Fill the frame with the label, hold steady and tap Take photo again');
+    toast('No barcode found, retake the photo','bad'); buzz([150,80,150]); beep(260,250);
+  }
+  /* quick=true : fast attempt on the current camera frame (no turning, no heavy pass); returns false if nothing was found
+     quick=false: thorough attempt (bigger image, tries turning the photo) */
+  async function processPhoto(src,quick){
+    if(ocrBusy) return false;
     ocrBusy=true; clearTimeout(sendTimer); sendTimer=null;
+    let found=false;
     try{
       await initEngine();
-      if(!mode){ toast('No barcode reader could load. Check your internet.','bad'); return; }
-      let work=toWork(src,2400);
-      flashShot(work);                                   // show the photo at once
-      banner('Photo taken 📸','Reading barcodes from the photo…');
-      await pause();
-      let list=await decodeAll(work);
-      for(const deg of [90,270]){                        // photo came out sideways: try turning it
-        if(list.length) break;
-        const rc=rotateCanvas(work,deg), l=await decodeAll(rc);
-        if(l.length){ work=rc; list=l; freezeC.width=work.width; freezeC.height=work.height; }
+      if(!mode){ toast('No barcode reader could load. Check your internet.','bad'); return false; }
+      let work=toWork(src, quick?1920:2400);
+      flashShot(work);                                   // photo shown at once
+      let list=await decodeAll(work,!quick);
+      if(!list.length && !quick){
+        for(const deg of [90,270]){                      // photo came out sideways: try turning it
+          const rc=rotateCanvas(work,deg), l=await decodeAll(rc,true);
+          if(l.length){ work=rc; list=l; freezeC.width=work.width; freezeC.height=work.height; break; }
+        }
       }
-      if(!list.length){
-        paintFreeze(work,[]);
-        banner('No barcode found','Fill the frame with the label, hold steady and take the photo again');
-        toast('No barcode found, retake the photo','bad'); buzz([150,80,150]); beep(260,250);
-        return;
-      }
-      const H=work.height;
-      const a=assign(sortCodes(list,H));
+      if(!list.length){ if(!quick) noBarcode(work); return false; }
+      found=true;
+      const a=assign(sortCodes(list,work.height));
       ORDER.forEach(k=>slots[k].value=a[k]); paint();
       Object.keys(nameOf).forEach(k=>delete nameOf[k]);
       ORDER.forEach(k=>{ if(a[k]) nameOf[a[k]]=LABEL[k]; });
       const n=ORDER.filter(k=>a[k]).length;
       paintFreeze(work,list);                            // photo with each barcode named
-      beep(1200,80); buzz(60);
+      beep(1200,60); buzz(40);
       if(list.length>3) toast('More than 3 barcodes found, check the values','bad');
       ['i1','i2'].forEach(k=>{ if(a[k] && !isImei15(a[k])) toast(LABEL[k]+' value fails the IMEI check, please verify','bad'); });
-      const how = 'Top to bottom: IMEI1, IMEI2, S/N';
       if(n>=2){
-        banner('Read '+n+' barcodes ✔',how+'. Sending now, tap Clear to cancel');
-        sendTimer=setTimeout(send,1500);
+        send();                                          // straight to the sheet, no waiting
       }else{
-        banner('Read '+n+(n===1?' barcode':' barcodes')+' ✔', n>=2 ? how+'. Check the values, then tap Send' : 'Only 1 barcode found. Retake or type the rest');
+        banner('Only 1 barcode found','Take the photo again, or type the rest and tap Send');
       }
     }catch(e){
       toast('Could not read the photo, try again','bad');
     }finally{
       ocrBusy=false;
     }
+    return found;
   }
 
-  // Take photo button: full-resolution still if the browser supports it, else a camera frame
+  // Take photo: instant read from the live camera frame; a sharper full-size photo is used only if that finds nothing
   $('#pShoot').onclick=async()=>{
     if(ocrBusy) return;
     hideFreeze();
     if(!running){ await startCam(); if(!running){ toast('Camera is off. Use the camera app or gallery button.','bad'); return; } }
-    let src=null;
+    if(await processPhoto(snapshot(),true)) return;
     const track=stream && stream.getVideoTracks()[0];
     if(track && 'ImageCapture' in window){
-      try{ banner('Focusing…','Hold steady'); src=await bitmapFrom(await new ImageCapture(track).takePhoto()); }catch(e){}
+      try{
+        banner('Trying a sharper photo…','Hold steady');
+        const big=await bitmapFrom(await new ImageCapture(track).takePhoto());
+        await processPhoto(big,false);
+        return;
+      }catch(e){}
     }
-    processPhoto(src||snapshot());
+    noBarcode(null);
   };
   // Photo from the phone's own camera app, or from the gallery
   async function fromFile(inp){
     const f=inp.files&&inp.files[0]; inp.value=''; if(!f) return;
-    try{ processPhoto(await bitmapFrom(f)); }catch(e){ toast('Could not open that photo','bad'); }
+    try{ processPhoto(await bitmapFrom(f),false); }catch(e){ toast('Could not open that photo','bad'); }
   }
   $('#pCamApp').onclick=()=>$('#fileCam').click();
   $('#pGallery').onclick=()=>$('#fileGal').click();
@@ -771,8 +776,10 @@ function initPhone(code){
   const fc=document.createElement('canvas'), bc=document.createElement('canvas');
   const fctx=fc.getContext('2d',{willReadFrequently:true}), bctx=bc.getContext('2d',{willReadFrequently:true});
 
-  async function initEngine(){
-    if(engineReady) return; engineReady=true;
+  function initEngine(){ return enginePromise || (enginePromise=initEngineRun()); }
+  let enginePromise=null;
+  async function initEngineRun(){
+    engineReady=true;
     if('BarcodeDetector' in window){
       try{
         const sup=await BarcodeDetector.getSupportedFormats();
