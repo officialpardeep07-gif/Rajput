@@ -166,6 +166,7 @@ tr.flash td{animation:flash 1.6s ease-out}
     </div>
     <span class="chip"><span class="dot" id="dDot"></span><span id="dStatus">Connecting…</span></span>
     <button class="btn primary" id="btnQR">📱 Connect phone</button>
+    <button class="btn" id="btnXl" title="Type every scanned barcode straight into the Excel file open on this laptop">📗 Excel: OFF</button>
     <button class="btn" id="btnScannerMode">📷 I'm on the phone</button>
     <button class="icon-btn" id="btnTheme" title="Switch theme">🌓</button>
   </header>
@@ -317,6 +318,32 @@ function initDesktop(){
   store.set('rows', rows);
   let phones = 0;
   const ridMap = {};   // phone row id -> sheet row id
+
+  /* ---------- Direct Excel: a small helper (xl-bridge) on this laptop types each scanned code into the open Excel file ---------- */
+  const XL_URL='http://127.0.0.1:8765', XL_KEY='sanchar-xl';
+  let xlOn=!!store.get('xlOn',false), xlOk=false, xlChain=Promise.resolve();
+  const xlPing=()=>fetch(XL_URL+'/ping?k='+XL_KEY,{mode:'no-cors',cache:'no-store'}).then(()=>true,()=>false);
+  function xlPaint(){
+    const b=$('#btnXl');
+    b.textContent = !xlOn ? '📗 Excel: OFF' : (xlOk ? '📗 Excel: ON ✔' : '📗 Excel: ON (helper not running)');
+    b.classList.toggle('success',xlOn&&xlOk);
+  }
+  async function xlCheck(){ if(!xlOn) return; xlOk=await xlPing(); xlPaint(); }
+  $('#btnXl').onclick=async()=>{
+    xlOn=!xlOn; store.set('xlOn',xlOn);
+    if(xlOn){
+      xlOk=await xlPing();
+      if(xlOk) toast('Excel connected. Click the first cell in Excel and start scanning','ok');
+      else toast('Excel helper is not running. Double-click xl-bridge.bat first','bad');
+    }
+    xlPaint();
+  };
+  function xlType(text){
+    if(!xlOn || !text) return;
+    xlChain=xlChain.then(()=>fetch(XL_URL+'/type?k='+XL_KEY,{method:'POST',mode:'no-cors',body:text}))
+      .catch(()=>{ xlOk=false; xlPaint(); toast('Excel helper not reachable. Is xl-bridge.bat running?','bad'); });
+  }
+  setInterval(xlCheck,4000); xlCheck(); xlPaint();
   const save = () => store.set('rows', rows);
 
   /* Duplicate rules:
@@ -491,6 +518,7 @@ function initDesktop(){
       const gone=()=>{ conns.delete(c); phones=conns.size; refresh(); setStatus(true,phones?phones+' phone connected':'Ready, waiting for phone'); };
       c.on('close',gone); c.on('error',gone);
       c.on('data',msg=>{
+        if(msg && msg.type==='code'){ xlType(cleanCode(msg.text)); return; }
         if(!msg || msg.type!=='row') return;
         const data={sn:cleanCode(msg.sn), i1:cleanCode(msg.i1), i2:cleanCode(msg.i2)};
         // the phone sends the row as soon as the first barcode is scanned, then sends it again (same rid) as more barcodes are scanned
@@ -777,6 +805,7 @@ function initPhone(code){
     hitFlash(); buzz(40); beep(1200,70);
     clearTimeout(sendTimer); sendTimer=null;
     pushRow();                                                               // shows on the sheet at once
+    try{ if(conn && conn.open) conn.send({type:'code',text}); }catch(e){}     // also lets the laptop type it into Excel
     const left=ORDER.filter(k=>!slots[k].value.trim());
     if(!left.length){
       banner('All 3 scanned ✔','Next label…');
