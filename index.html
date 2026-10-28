@@ -117,6 +117,12 @@ tr.flash td{animation:flash 1.6s ease-out}
 #cam{position:relative;width:100%;aspect-ratio:3/4;max-height:60vh}
 #cam video{width:100%;height:100%;display:block}
 #ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.freeze{position:absolute;inset:0;width:100%;height:100%;display:none;background:#000;object-fit:contain}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+.flash.go{animation:shutter .35s ease-out}
+@keyframes shutter{0%{opacity:.9}100%{opacity:0}}
+.recent div.item img.thumb{width:64px;height:42px;object-fit:cover;border-radius:8px;flex:none}
+.recent div.item .txt{flex:1;min-width:0;display:grid;gap:2px;font-size:11.5px;overflow-wrap:anywhere}
 .frame{position:absolute;inset:4%;border:3px dashed rgba(255,255,255,.8);border-radius:18px;pointer-events:none}
 .frame::after{content:"Fit the WHOLE label inside this box";position:absolute;left:50%;top:-1px;transform:translate(-50%,-50%);background:rgba(0,0,0,.7);color:#fff;font:600 11px var(--sans);padding:3px 10px;border-radius:999px;white-space:nowrap}
 .hint{color:var(--muted);font-size:13px;margin:10px 2px;line-height:1.5}
@@ -131,6 +137,9 @@ tr.flash td{animation:flash 1.6s ease-out}
 .slot .lab{width:62px;font-weight:700;font-size:13px;color:var(--muted);flex:none}
 .slot input{flex:1;min-width:0;border:none;background:transparent;color:var(--text);font:600 15px var(--mono);outline:none}
 .slot button{border:none;background:none;font-size:18px;color:var(--muted)}
+.shoot{width:100%;justify-content:center;padding:18px;font-size:17px;border-radius:16px;margin-top:10px}
+.srcrow{display:flex;gap:10px;margin-top:10px}
+.srcrow .btn{flex:1;justify-content:center;padding:12px;font-size:13px}
 .phone-actions{display:flex;gap:10px}
 .phone-actions .btn{flex:1;justify-content:center;padding:14px}
 .recent{margin-top:18px}
@@ -223,9 +232,16 @@ tr.flash td{animation:flash 1.6s ease-out}
     <span class="chip"><span class="dot" id="pDot"></span><span id="pStatus">Connecting…</span></span>
     <button class="icon-btn" id="pTheme">🌓</button>
   </div>
-  <div id="camWrap"><div id="cam"><video id="vid" playsinline muted autoplay></video><canvas id="ov"></canvas><div class="frame"></div></div></div>
+  <div id="camWrap"><div id="cam"><video id="vid" playsinline muted autoplay></video><canvas id="freeze" class="freeze"></canvas><div class="flash" id="flash"></div><div class="frame"></div></div></div>
   <div class="step" id="stepBanner"></div>
-  <p class="hint" id="pHint">Hold the phone so <b>all the barcodes</b> (S/N, IMEI1, IMEI2) fit inside the big box. Every barcode in view is read together, 3 barcodes give 3 values, 2 barcodes give 2. They are placed top to bottom, then the row is sent to the sheet automatically.</p>
+  <button class="btn primary shoot" id="pShoot">📸 Take photo</button>
+  <div class="srcrow">
+    <button class="btn" id="pCamApp">📷 Use phone camera app</button>
+    <button class="btn" id="pGallery">🖼 Pick from gallery</button>
+  </div>
+  <input type="file" id="fileCam" accept="image/*" capture="environment" hidden>
+  <input type="file" id="fileGal" accept="image/*" hidden>
+  <p class="hint" id="pHint"><b>1.</b> Put the whole label in the box. <b>2.</b> Tap <b>Take photo</b>. Every barcode is read from the photo and goes to its own column in the sheet: <b>1st (top) = IMEI1, 2nd = IMEI2, 3rd = S/N</b>. With only 2 barcodes: <b>IMEI1, S/N</b>. If the live view is blurry, use <b>Use phone camera app</b> for a sharp photo.</p>
   <div class="slots">
     <div class="slot" data-k="sn"><span class="lab">S/N</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
     <div class="slot" data-k="i1"><span class="lab">IMEI1</span><input id="f_i1" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
@@ -236,9 +252,8 @@ tr.flash td{animation:flash 1.6s ease-out}
     <button class="btn primary" id="pSend">Send to sheet</button>
   </div>
   <div class="phone-actions" style="margin-top:10px">
-    <button class="btn" id="pCam">📷 Start / stop camera</button>
+    <button class="btn" id="pCam">📷 Camera on / off</button>
   </div>
-  <label class="toggle" style="margin-top:10px;width:100%"><input type="checkbox" id="strict" checked> Smart sort: detect IMEI by its checksum (off = plain top-to-bottom order)</label>
   <div class="recent"><h3>Recently sent</h3><div id="recent"></div></div>
 </div>
 
@@ -282,6 +297,8 @@ function beep(freq,dur){
 const buzz = p => { try{ navigator.vibrate && navigator.vibrate(p);}catch(e){} };
 
 const normV = v => String(v||'').trim().toUpperCase();
+// Some scanners add a hidden "symbology identifier" in front of the data, e.g. ]C1 for Code 128. It is not part of the barcode, so remove it.
+const cleanCode = t => String(t||'').replace(/[\x00-\x1f\x7f]/g,'').replace(/^\][A-Za-z][0-9A-Za-z]/,'').trim();
 const isImei = v => /^\d{14,16}$/.test(v);
 const luhn = v => { let sum=0, alt=false; for(let i=v.length-1;i>=0;i--){ let n=+v[i]; if(alt){ n*=2; if(n>9) n-=9; } sum+=n; alt=!alt; } return sum%10===0; };
 const isImei15 = v => /^\d{15}$/.test(v) && luhn(v);
@@ -289,6 +306,7 @@ const CODE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const makeCode = () => Array.from({length:6},()=>CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]).join('');
 const uid = () => Math.random().toString(36).slice(2,9);
 const PEER_PREFIX='smartscan-';
+const loadScript = url => new Promise(res=>{ const s=document.createElement('script'); s.src=url; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s); });
 
 const roomFromHash = (location.hash.match(/room=([A-Za-z0-9]+)/)||[])[1];
 
@@ -298,6 +316,8 @@ const roomFromHash = (location.hash.match(/room=([A-Za-z0-9]+)/)||[])[1];
 function initDesktop(){
   $('#desktop').classList.remove('hidden');
   let rows = store.get('rows', []);
+  rows.forEach(r=>{ r.sn=cleanCode(r.sn); r.i1=cleanCode(r.i1); r.i2=cleanCode(r.i2); });
+  store.set('rows', rows);
   let phones = 0;
   const save = () => store.set('rows', rows);
 
@@ -473,7 +493,7 @@ function initDesktop(){
       c.on('close',gone); c.on('error',gone);
       c.on('data',msg=>{
         if(!msg || msg.type!=='row') return;
-        const data={sn:String(msg.sn||'').trim(), i1:String(msg.i1||'').trim(), i2:String(msg.i2||'').trim()};
+        const data={sn:cleanCode(msg.sn), i1:cleanCode(msg.i1), i2:cleanCode(msg.i2)};
         const d=dupSets();
         const dupFields=[];
         if(data.sn && d.sn[normV(data.sn)]) dupFields.push('Serial');
@@ -557,12 +577,12 @@ function initPhone(code){
     if(!peer || peer.destroyed){ peer=new Peer(); peer.on('error',()=>{ setP(false,'Sheet not found. Is the page open on your computer?'); retry=setTimeout(connect,3000); }); }
     const go=()=>{
       conn=peer.connect(PEER_PREFIX+code,{reliable:true});
-      conn.on('open',()=>{ setP(true,'Connected to sheet'); beep(880,100); buzz(60); });
+      conn.on('open',()=>{ setP(true,'Connected to sheet'); beep(880,100); buzz(60); if(!running) startCam(); });
       conn.on('close',()=>{ setP(false,'Disconnected, retrying…'); retry=setTimeout(connect,2000); });
       conn.on('error',()=>{ setP(false,'Error, retrying…'); retry=setTimeout(connect,2500); });
       conn.on('data',msg=>{
         if(msg && msg.type==='ack'){
-          recent.unshift(msg); if(recent.length>8) recent.pop(); renderRecent();
+          msg.thumb=thumbQ.shift()||''; recent.unshift(msg); if(recent.length>8) recent.pop(); renderRecent();
           if(msg.dup && msg.dup.length){ toast('⚠️ Duplicate: '+msg.dup.join(', '),'bad'); buzz([200,80,200,80,200]); beep(300,350); }
           else { toast('✅ Added to sheet','ok'); buzz(80); beep(1000,90); }
         }
@@ -577,9 +597,11 @@ function initPhone(code){
     const box=$('#recent'); box.innerHTML='';
     recent.forEach(m=>{
       const d=document.createElement('div'); d.className='item'+(m.dup&&m.dup.length?' dup':'');
-      const a=document.createElement('span'); a.textContent=(m.sn||'-')+' · '+(m.i1||'-');
+      if(m.thumb){ const im=new Image(); im.src=m.thumb; im.className='thumb'; d.appendChild(im); }
+      const tx=document.createElement('div'); tx.className='txt';
+      [['IMEI1',m.i1],['IMEI2',m.i2],['S/N',m.sn]].forEach(([l,v])=>{ if(v){ const r=document.createElement('span'); r.textContent=l+': '+v; tx.appendChild(r); } });
       const b=document.createElement('span'); b.textContent=(m.dup&&m.dup.length)?'DUPLICATE':'OK';
-      d.append(a,b); box.appendChild(d);
+      d.append(tx,b); box.appendChild(d);
     });
   }
 
@@ -592,11 +614,11 @@ function initPhone(code){
     s.querySelector('button').onclick=()=>{ slots[k].value=''; paint(); };
     slots[k].addEventListener('input',paint);
   });
-  const READY='Show the whole label to the camera';
+  const READY='Put the label in the box, then tap Take photo';
   function clearSlots(){
     clearTimeout(sendTimer); sendTimer=null;
-    Object.values(slots).forEach(i=>i.value=''); paint();
-    banner(READY,'All barcodes are read together');
+    Object.values(slots).forEach(i=>i.value=''); paint(); hideFreeze();
+    banner(READY,'Every barcode is read from the photo');
   }
   $('#pClear').onclick=clearSlots;
 
@@ -606,7 +628,9 @@ function initPhone(code){
     if(!sn && !i1 && !i2){ toast('Nothing to send yet','bad'); return; }
     if(!conn || !conn.open){ toast('Not connected to the sheet','bad'); connect(); return; }
     conn.send({type:'row',sn,i1,i2});
+    thumbQ.push(pendingThumb); pendingThumb='';
     clearSlots();
+    freezeC.style.display='block'; setTimeout(hideFreeze,1000); // keep the photo visible for a moment
     banner('Sent ✔','Move the label away, then show the next one');
   }
   $('#pSend').onclick=send;
@@ -621,54 +645,126 @@ function initPhone(code){
   }
   function assign(sorted){
     const t=sorted.map(c=>c.text), out={sn:'',i1:'',i2:''};
-    if($('#strict').checked){
+    {
+      // checksum check: IMEI = valid 15-digit number, everything else = S/N
       const im=t.filter(isImei15), non=t.filter(x=>!isImei15(x));
-      if((non.length===1 && im.length<=2) || (non.length===0 && im.length===2)){
-        out.sn=non[0]||''; out.i1=im[0]||''; out.i2=im[1]||''; return out;
-      }
+      if(non.length<=1 && im.length<=2 && t.length>=1){ out.sn=non[0]||''; out.i1=im[0]||''; out.i2=im[1]||''; return out; }
     }
-    out.sn=t[0]||''; out.i1=t[1]||''; out.i2=t[2]||''; return out;
+    // plain top-to-bottom rule of the label: IMEI1, IMEI2, S/N  (only 2 barcodes: IMEI1, S/N)
+    if(t.length>=3){ out.i1=t[0]; out.i2=t[1]; out.sn=t[2]; }
+    else if(t.length===2){ out.i1=t[0]; out.sn=t[1]; }
+    else if(t.length===1){ out.i1=t[0]; }
+    return out;
   }
-  function capture(list,H){
-    const a=assign(sortCodes(list,H));
-    ORDER.forEach(k=>slots[k].value=a[k]); paint();
-    const n=ORDER.filter(k=>a[k]).length;
-    beep(1200,80); buzz(60);
-    if(list.length>3) toast('More than 3 barcodes in view, check the values','bad');
-    if(n>=2){
-      banner('Captured '+n+' barcodes ✔','Sending in a moment. Tap Clear to cancel');
-      clearTimeout(sendTimer); sendTimer=setTimeout(send,1200);
-    }else{
-      banner('Only 1 barcode found','Move back so the whole label fits, or type the rest');
+
+  let ocrBusy=false;               // true while a photo is being processed
+  const nameOf={};
+  function snapshot(){
+    const c=document.createElement('canvas'); c.width=vid.videoWidth; c.height=vid.videoHeight;
+    c.getContext('2d').drawImage(vid,0,0); return c;
+  }
+
+  /* ================= PHOTO PIPELINE =================
+     1) take a photo (full-resolution if the phone allows it)
+     2) read every barcode from that photo
+     3) place them top to bottom (IMEI1, IMEI2, S/N) and send the row */
+  function toWork(src,maxW){
+    const sw=src.naturalWidth||src.width||src.videoWidth, sh=src.naturalHeight||src.height||src.videoHeight, sc=Math.min(1,maxW/sw);
+    const c=document.createElement('canvas'); c.width=Math.round(sw*sc); c.height=Math.round(sh*sc);
+    c.getContext('2d').drawImage(src,0,0,c.width,c.height); return c;
+  }
+  function rotateCanvas(c,deg){
+    const r=document.createElement('canvas'), flat=(deg===180);
+    r.width=flat?c.width:c.height; r.height=flat?c.height:c.width;
+    const x=r.getContext('2d'); x.translate(r.width/2,r.height/2); x.rotate(deg*Math.PI/180); x.drawImage(c,-c.width/2,-c.height/2);
+    return r;
+  }
+  const pause=()=>new Promise(r=>setTimeout(r,20));
+  async function decodeAll(canvas){
+    const out=new Map();
+    if(detector){ try{ (await detectNative(canvas)).forEach(c=>out.set(c.text,c)); }catch(e){} }
+    if(zReader && (!detector || out.size<3)){
+      await pause();
+      try{ detectZX(canvas,canvas.width,canvas.height,{maxW:2400,bhR:0.09,stepR:0.035}).forEach(c=>{ if(!out.has(c.text)) out.set(c.text,c); }); }catch(e){}
+    }
+    return [...out.values()];
+  }
+  async function bitmapFrom(blob){
+    try{ return await createImageBitmap(blob,{imageOrientation:'from-image'}); }catch(e){}
+    try{ return await createImageBitmap(blob); }catch(e){}
+    return await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=URL.createObjectURL(blob); });
+  }
+
+  async function processPhoto(src){
+    if(ocrBusy) return;
+    ocrBusy=true; clearTimeout(sendTimer); sendTimer=null;
+    try{
+      await initEngine();
+      if(!mode){ toast('No barcode reader could load. Check your internet.','bad'); return; }
+      let work=toWork(src,2400);
+      flashShot(work);                                   // show the photo at once
+      banner('Photo taken 📸','Reading barcodes from the photo…');
+      await pause();
+      let list=await decodeAll(work);
+      for(const deg of [90,270]){                        // photo came out sideways: try turning it
+        if(list.length) break;
+        const rc=rotateCanvas(work,deg), l=await decodeAll(rc);
+        if(l.length){ work=rc; list=l; freezeC.width=work.width; freezeC.height=work.height; }
+      }
+      if(!list.length){
+        paintFreeze(work,[]);
+        banner('No barcode found','Fill the frame with the label, hold steady and take the photo again');
+        toast('No barcode found, retake the photo','bad'); buzz([150,80,150]); beep(260,250);
+        return;
+      }
+      const H=work.height;
+      const a=assign(sortCodes(list,H));
+      ORDER.forEach(k=>slots[k].value=a[k]); paint();
+      Object.keys(nameOf).forEach(k=>delete nameOf[k]);
+      ORDER.forEach(k=>{ if(a[k]) nameOf[a[k]]=LABEL[k]; });
+      const n=ORDER.filter(k=>a[k]).length;
+      paintFreeze(work,list);                            // photo with each barcode named
+      beep(1200,80); buzz(60);
+      if(list.length>3) toast('More than 3 barcodes found, check the values','bad');
+      ['i1','i2'].forEach(k=>{ if(a[k] && !isImei15(a[k])) toast(LABEL[k]+' value fails the IMEI check, please verify','bad'); });
+      const how = 'Top to bottom: IMEI1, IMEI2, S/N';
+      if(n>=2){
+        banner('Read '+n+' barcodes ✔',how+'. Sending now, tap Clear to cancel');
+        sendTimer=setTimeout(send,1500);
+      }else{
+        banner('Read '+n+(n===1?' barcode':' barcodes')+' ✔', n>=2 ? how+'. Check the values, then tap Send' : 'Only 1 barcode found. Retake or type the rest');
+      }
+    }catch(e){
+      toast('Could not read the photo, try again','bad');
+    }finally{
+      ocrBusy=false;
     }
   }
 
-  /* A set of codes is accepted only when the same set is seen in 3 frames in a row. */
-  let prevKey='', stable=0, lockKey='', emptySince=0, pending=[];
-  function handleCodes(list,H){
-    const now=Date.now();
-    if(!list.length){
-      prevKey=''; stable=0;
-      if(!emptySince) emptySince=now;
-      if(now-emptySince>900) lockKey='';
-      return;
+  // Take photo button: full-resolution still if the browser supports it, else a camera frame
+  $('#pShoot').onclick=async()=>{
+    if(ocrBusy) return;
+    hideFreeze();
+    if(!running){ await startCam(); if(!running){ toast('Camera is off. Use the camera app or gallery button.','bad'); return; } }
+    let src=null;
+    const track=stream && stream.getVideoTracks()[0];
+    if(track && 'ImageCapture' in window){
+      try{ banner('Focusing…','Hold steady'); src=await bitmapFrom(await new ImageCapture(track).takePhoto()); }catch(e){}
     }
-    emptySince=0;
-    const key=list.map(c=>c.text).sort().join('|');
-    if(!sendTimer) banner('Detected '+list.length+(list.length===1?' barcode':' barcodes'),'Hold steady…');
-    if(key===lockKey) return;
-    if(key===prevKey) stable++; else { prevKey=key; stable=1; }
-    if(stable<3) return;
-    if(sendTimer){ // inside the short send window: only accept a bigger set that includes what we already captured
-      const texts=list.map(c=>c.text);
-      if(!(pending.every(t=>texts.includes(t)) && texts.length>pending.length)) return;
-    }
-    pending=list.map(c=>c.text); lockKey=key; prevKey=''; stable=0;
-    capture(list,H);
+    processPhoto(src||snapshot());
+  };
+  // Photo from the phone's own camera app, or from the gallery
+  async function fromFile(inp){
+    const f=inp.files&&inp.files[0]; inp.value=''; if(!f) return;
+    try{ processPhoto(await bitmapFrom(f)); }catch(e){ toast('Could not open that photo','bad'); }
   }
+  $('#pCamApp').onclick=()=>$('#fileCam').click();
+  $('#pGallery').onclick=()=>$('#fileGal').click();
+  $('#fileCam').onchange=e=>fromFile(e.target);
+  $('#fileGal').onchange=e=>fromFile(e.target);
 
   /* ---- camera + multi-barcode detection ---- */
-  const vid=$('#vid'), ov=$('#ov'), cam=$('#cam'), octx=ov.getContext('2d');
+  const vid=$('#vid'), cam=$('#cam');
   const FMT=['code_128','code_39','code_93','ean_13','ean_8','upc_a','upc_e','itf','codabar','qr_code','data_matrix'];
   let stream=null, running=false, timer=null, busy=false, mode='', detector=null, engineReady=false;
   let zReader=null, zHints=null;
@@ -681,7 +777,7 @@ function initPhone(code){
       try{
         const sup=await BarcodeDetector.getSupportedFormats();
         const f=FMT.filter(x=>sup.includes(x));
-        if(f.length){ detector=new BarcodeDetector({formats:f}); mode='native'; return; }
+        if(f.length){ detector=new BarcodeDetector({formats:f}); mode='native'; }
       }catch(e){}
     }
     if(window.ZXing){
@@ -690,56 +786,85 @@ function initPhone(code){
       zHints=new Map();
       zHints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.CODE_128,Z.BarcodeFormat.CODE_39,Z.BarcodeFormat.CODE_93,Z.BarcodeFormat.EAN_13,Z.BarcodeFormat.EAN_8,Z.BarcodeFormat.UPC_A,Z.BarcodeFormat.ITF,Z.BarcodeFormat.CODABAR,Z.BarcodeFormat.QR_CODE,Z.BarcodeFormat.DATA_MATRIX]);
       zHints.set(Z.DecodeHintType.TRY_HARDER,true);
-      mode='zxing';
+      if(!mode) mode='zxing';
     }
   }
 
   // Chrome / Edge / Samsung browser on Android: reads every barcode in the frame in one go
-  async function detectNative(){
-    const res=await detector.detect(vid);
+  async function detectNative(src){
+    const res=await detector.detect(src||vid);
     return res.map(r=>{
       const b=r.boundingBox, p=(r.cornerPoints||[]).map(q=>({x:q.x,y:q.y}));
-      return {text:String(r.rawValue||'').trim(), x:b?b.x+b.width/2:0, y:b?b.y+b.height/2:0, poly:p};
+      const rect=b?{x0:b.x,y0:b.y,x1:b.x+b.width,y1:b.y+b.height}:{x0:Math.min(...p.map(q=>q.x)),y0:Math.min(...p.map(q=>q.y)),x1:Math.max(...p.map(q=>q.x)),y1:Math.max(...p.map(q=>q.y))};
+      return {text:cleanCode(r.rawValue), x:(rect.x0+rect.x1)/2, y:(rect.y0+rect.y1)/2, poly:p, rect};
     }).filter(c=>c.text);
   }
   // Compatibility mode (Safari, Firefox): cut the frame into overlapping horizontal strips and decode each one
-  function detectZX(){
-    const Z=window.ZXing, vw=vid.videoWidth, vh=vid.videoHeight;
-    const sc=Math.min(1,1600/vw), w=Math.round(vw*sc), h=Math.round(vh*sc);
-    fc.width=w; fc.height=h; fctx.drawImage(vid,0,0,w,h);
-    const bh=Math.round(h*0.26), step=Math.round(h*0.12), found=new Map();
+  function detectZX(src,sw,sh,opt){
+    src=src||vid; opt=opt||{};
+    const Z=window.ZXing, vw=sw||vid.videoWidth, vh=sh||vid.videoHeight;
+    const sc=Math.min(1,(opt.maxW||1600)/vw), w=Math.round(vw*sc), h=Math.round(vh*sc);
+    fc.width=w; fc.height=h; fctx.drawImage(src,0,0,w,h);
+    const bh=Math.round(h*(opt.bhR||0.14)), step=Math.max(4,Math.round(h*(opt.stepR||0.05))), found=new Map();
     for(let top=0;;top+=step){
       const t=(top+bh>h)?h-bh:top;
       bc.width=w; bc.height=bh; bctx.drawImage(fc,0,t,w,bh,0,0,w,bh);
       try{
         const bmp=new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(bc)));
         const r=zReader.decode(bmp,zHints);
-        const text=(r.getText()||'').trim();
-        if(text && !found.has(text)){
+        const text=cleanCode(r.getText());
+        if(text){
           const pts=r.getResultPoints()||[];
           let x=w/2, y=bh/2;
           if(pts.length){ x=pts.reduce((s,q)=>s+q.getX(),0)/pts.length; y=pts.reduce((s,q)=>s+q.getY(),0)/pts.length; }
-          found.set(text,{text,x:x/sc,y:(y+t)/sc,poly:pts.map(q=>({x:q.getX()/sc,y:(q.getY()+t)/sc}))});
+          if(found.has(text)){ const f=found.get(text); f.sy+=(y+t)/sc; f.n++; }   // same barcode seen in another strip: average its height
+          else{
+            const xs=pts.map(q=>q.getX()), ys=pts.map(q=>q.getY());
+            const rx0=(xs.length?Math.min(...xs):x-w*0.1), rx1=(xs.length?Math.max(...xs):x+w*0.1);
+            const ry0=(ys.length?Math.min(...ys):y)-bh*0.08, ry1=(ys.length?Math.max(...ys):y)+bh*0.08;
+            found.set(text,{text,sy:(y+t)/sc,n:1,x:x/sc,y:(y+t)/sc,poly:pts.map(q=>({x:q.getX()/sc,y:(q.getY()+t)/sc})),
+              rect:{x0:rx0/sc,y0:(ry0+t)/sc,x1:rx1/sc,y1:(ry1+t)/sc}});
+          }
         }
       }catch(e){ /* nothing in this strip */ }
       if(t+bh>=h) break;
     }
-    return [...found.values()];
+    return [...found.values()].map(f=>{ f.y=f.sy/f.n; return f; });
   }
 
-  function drawOverlay(list){
-    const W=vid.videoWidth, H=vid.videoHeight;
-    if(ov.width!==W||ov.height!==H){ ov.width=W; ov.height=H; }
-    octx.clearRect(0,0,W,H);
-    octx.lineWidth=Math.max(3,W/300); octx.strokeStyle='#3ddc84'; octx.fillStyle='#3ddc84';
-    octx.font='600 '+Math.round(W/38)+'px monospace';
+  function drawBoxes(ctx,W,list){
+    ctx.lineWidth=Math.max(3,W/300); ctx.strokeStyle='#3ddc84'; ctx.fillStyle='#3ddc84';
+    ctx.font='600 '+Math.round(W/38)+'px monospace';
     list.forEach(c=>{
       const p=c.poly||[];
-      if(p.length>=2){ octx.beginPath(); octx.moveTo(p[0].x,p[0].y); p.slice(1).forEach(q=>octx.lineTo(q.x,q.y)); if(p.length>2) octx.closePath(); octx.stroke(); }
-      else { octx.beginPath(); octx.arc(c.x,c.y,W/80,0,7); octx.fill(); }
-      octx.fillText(c.text,Math.max(6,Math.min(c.x-W/10,W-W/3)),Math.max(W/36,c.y-W/45));
+      if(p.length>=2){ ctx.beginPath(); ctx.moveTo(p[0].x,p[0].y); p.slice(1).forEach(q=>ctx.lineTo(q.x,q.y)); if(p.length>2) ctx.closePath(); ctx.stroke(); }
+      else { ctx.beginPath(); ctx.arc(c.x,c.y,W/80,0,7); ctx.fill(); }
+      const label=(nameOf[c.text]?nameOf[c.text]+'  ':'')+c.text;
+      const tx=Math.max(6,Math.min(c.x-W/10,W-W/3)), ty=Math.max(W/36,c.y-W/45);
+      const tw=ctx.measureText(label).width, th=Math.round(W/38);
+      ctx.fillStyle='rgba(0,0,0,.65)'; ctx.fillRect(tx-4,ty-th,tw+8,th+8);
+      ctx.fillStyle='#3ddc84'; ctx.fillText(label,tx,ty);
     });
   }
+  /* ---- photo capture: freeze the frame like a camera shot ---- */
+  const freezeC=$('#freeze'), flashEl=$('#flash');
+  let pendingThumb='', thumbQ=[];
+  function flashShot(shot){
+    freezeC.width=shot.width; freezeC.height=shot.height;
+    freezeC.getContext('2d').drawImage(shot,0,0);
+    freezeC.style.display='block';
+    flashEl.classList.remove('go'); void flashEl.offsetWidth; flashEl.classList.add('go');
+    beep(2000,35); buzz(30);
+  }
+  function paintFreeze(shot,list){
+    const ctx=freezeC.getContext('2d');
+    ctx.drawImage(shot,0,0);
+    drawBoxes(ctx,shot.width,list);
+    const t=document.createElement('canvas'); t.width=160; t.height=Math.round(160*shot.height/shot.width);
+    t.getContext('2d').drawImage(freezeC,0,0,t.width,t.height);
+    pendingThumb=t.toDataURL('image/jpeg',0.6);
+  }
+  function hideFreeze(){ freezeC.style.display='none'; }
 
   function fit(){
     const W=vid.videoWidth, H=vid.videoHeight; if(!W) return;
@@ -752,23 +877,9 @@ function initPhone(code){
   addEventListener('resize',fit);
   addEventListener('orientationchange',()=>setTimeout(fit,300));
 
-  async function tick(){
-    if(!running) return;
-    if(!busy && vid.readyState>=2 && vid.videoWidth){
-      busy=true;
-      try{
-        const list = mode==='native' ? await detectNative() : detectZX();
-        drawOverlay(list); handleCodes(list,vid.videoHeight);
-      }catch(e){}
-      busy=false;
-    }
-    timer=setTimeout(tick, mode==='native'?150:120);
-  }
-
   async function startCam(){
     if(running) return;
-    await initEngine();
-    if(!mode){ toast('No barcode reader could load. Check your internet.','bad'); return; }
+    initEngine();   // load the barcode reader in the background while the camera opens
     try{
       stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
       vid.srcObject=stream; await vid.play();
@@ -776,22 +887,21 @@ function initPhone(code){
         const tr=stream.getVideoTracks()[0], caps=tr.getCapabilities&&tr.getCapabilities();
         if(caps && caps.focusMode && caps.focusMode.includes('continuous')) await tr.applyConstraints({advanced:[{focusMode:'continuous'}]});
       }catch(e){}
-      running=true; fit(); tick();
-      banner(READY,'All barcodes are read together');
-      if(mode==='zxing') toast('Compatibility reader in use. Chrome on Android is fastest.');
-    }catch(e){
-      $('#pHint').textContent='The camera did not start. Allow camera permission in your browser and open this page over https. You can still type the values by hand.';
+      running=true; fit();
+      banner(READY,'Every barcode is read from the photo');
+        }catch(e){
+      $('#pHint').textContent='The live camera did not start. Allow camera permission and open this page over https, or tap Use phone camera app below to take the photo.';
       toast('Camera permission needed','bad');
     }
   }
   function stopCam(){
     running=false; clearTimeout(timer);
     if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
-    vid.srcObject=null; octx.clearRect(0,0,ov.width,ov.height);
+    vid.srcObject=null;
   }
   $('#pCam').onclick=()=>running?stopCam():startCam();
   document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopCam(); });
-  banner(READY,'All barcodes are read together');
+  banner(READY,'Every barcode is read from the photo');
   startCam();
   paint();
 }
