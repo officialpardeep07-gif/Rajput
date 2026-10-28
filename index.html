@@ -238,7 +238,7 @@ tr.flash td{animation:flash 1.6s ease-out}
   </div>
   <div id="camWrap"><div id="cam"><video id="vid" playsinline muted autoplay></video><div class="laser"></div></div></div>
   <div class="step" id="stepBanner"></div>
-  <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode. Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. When all 3 boxes are filled the row is sent by itself, otherwise tap <b>Send to sheet</b>.</p>
+  <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode. Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
   <div class="slots">
     <div class="slot" data-k="sn"><span class="lab">S/N</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
     <div class="slot" data-k="i1"><span class="lab">IMEI1</span><input id="f_i1" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
@@ -316,14 +316,16 @@ function initDesktop(){
   rows.forEach(r=>{ r.sn=cleanCode(r.sn); r.i1=cleanCode(r.i1); r.i2=cleanCode(r.i2); });
   store.set('rows', rows);
   let phones = 0;
+  const ridMap = {};   // phone row id -> sheet row id
   const save = () => store.set('rows', rows);
 
   /* Duplicate rules:
      Serial  -> same serial in more than one row.
      IMEI    -> same number anywhere across IMEI 1 + IMEI 2 columns (all rows). */
-  function dupSets(){
+  function dupSets(excludeId){
     const sn={}, im={};
     rows.forEach(r=>{
+      if(excludeId && r.id===excludeId) return;
       const s=normV(r.sn); if(s) sn[s]=(sn[s]||0)+1;
       [r.i1,r.i2].forEach(x=>{ const v=normV(x); if(v) im[v]=(im[v]||0)+1; });
     });
@@ -491,16 +493,26 @@ function initDesktop(){
       c.on('data',msg=>{
         if(!msg || msg.type!=='row') return;
         const data={sn:cleanCode(msg.sn), i1:cleanCode(msg.i1), i2:cleanCode(msg.i2)};
-        const d=dupSets();
+        // the phone sends the row as soon as the first barcode is scanned, then sends it again (same rid) as more barcodes are scanned
+        const ex=msg.rid ? rows.find(r=>r.id===ridMap[msg.rid]) : null;
+        const d=dupSets(ex && ex.id);
         const dupFields=[];
-        if(data.sn && d.sn[normV(data.sn)]) dupFields.push('Serial');
-        if(data.i1 && d.im[normV(data.i1)]) dupFields.push('IMEI 1');
-        if(data.i2 && d.im[normV(data.i2)]) dupFields.push('IMEI 2');
+        const chg=k=>!ex || normV(ex[k])!==normV(data[k]);
+        if(data.sn && chg('sn') && d.sn[normV(data.sn)]) dupFields.push('Serial');
+        if(data.i1 && chg('i1') && d.im[normV(data.i1)]) dupFields.push('IMEI 1');
+        if(data.i2 && chg('i2') && d.im[normV(data.i2)]) dupFields.push('IMEI 2');
         if(data.i1 && data.i2 && normV(data.i1)===normV(data.i2)) dupFields.push('IMEI 1 = IMEI 2');
-        addRow(false,data,true);
+        if(ex){
+          if(!chg('sn') && !chg('i1') && !chg('i2')) return;
+          Object.assign(ex,data); save(); render(); refresh();
+          const tr=tbody.querySelector(`tr[data-id="${ex.id}"]`); if(tr){ tr.scrollIntoView({block:'nearest'}); tr.classList.add('flash'); }
+        }else{
+          const r=addRow(false,data,true);
+          if(msg.rid) ridMap[msg.rid]=r.id;
+        }
         beep(dupFields.length?300:1000, dupFields.length?300:90);
-        if(dupFields.length) toast('⚠️ Duplicate: '+dupFields.join(', '),'bad'); else toast('✅ New row added','ok');
-        try{ c.send({type:'ack',dup:dupFields,sn:data.sn,i1:data.i1,i2:data.i2}); }catch(e){}
+        if(dupFields.length) toast('⚠️ Duplicate: '+dupFields.join(', '),'bad'); else toast(ex?'✅ Row updated':'✅ New row added','ok');
+        try{ c.send({type:'ack',rid:msg.rid,upd:!!ex,dup:dupFields,sn:data.sn,i1:data.i1,i2:data.i2}); }catch(e){}
       });
     });
   }
@@ -579,9 +591,10 @@ function initPhone(code){
       conn.on('error',()=>{ setP(false,'Error, retrying…'); retry=setTimeout(connect,2500); });
       conn.on('data',msg=>{
         if(msg && msg.type==='ack'){
+          const ix=msg.rid?recent.findIndex(x=>x.rid===msg.rid):-1; if(ix>=0) recent.splice(ix,1);
           recent.unshift(msg); if(recent.length>8) recent.pop(); renderRecent();
           if(msg.dup && msg.dup.length){ toast('⚠️ Duplicate: '+msg.dup.join(', '),'bad'); buzz([200,80,200,80,200]); beep(300,350); }
-          else { toast('✅ Added to sheet','ok'); buzz(80); beep(1000,90); }
+          else toast(msg.upd?'✅ Sheet updated':'✅ Added to sheet','ok');
         }
       });
       setTimeout(()=>{ if(conn && !conn.open){ try{conn.close();}catch(e){} } },8000);
@@ -618,17 +631,30 @@ function initPhone(code){
     Object.values(slots).forEach(i=>i.value=''); paint();
     banner(READY,READY_SUB);
   }
-  $('#pClear').onclick=clearSlots;
+  let curRid=null, lastScanAt=0;   // curRid = the row of the device being scanned now (already on the sheet)
+  $('#pClear').onclick=()=>{ curRid=null; clearSlots(); };
 
-  function send(){
-    clearTimeout(sendTimer); sendTimer=null;
+  // put what is in the 3 boxes on the sheet right now (first call adds the row, later calls update the same row)
+  function pushRow(){
     const sn=slots.sn.value.trim(), i1=slots.i1.value.trim(), i2=slots.i2.value.trim();
-    if(!sn && !i1 && !i2){ toast('Nothing to send yet','bad'); return; }
-    if(!conn || !conn.open){ toast('Not connected to the sheet','bad'); connect(); return; }
-    conn.send({type:'row',sn,i1,i2});
-    [sn,i1,i2].forEach(t=>{ if(t) cool[t]=Date.now()+3000; });
-    clearSlots();
-    banner('Sent ✔','Move to the next label');
+    if(!sn && !i1 && !i2) return false;
+    if(!conn || !conn.open){ toast('Not connected to the sheet','bad'); connect(); return false; }
+    if(!curRid) curRid=uid();
+    conn.send({type:'row',rid:curRid,sn,i1,i2});
+    return true;
+  }
+  // done with this device: next barcode starts a new row
+  function finishRow(msg){
+    clearTimeout(sendTimer); sendTimer=null;
+    [slots.sn,slots.i1,slots.i2].forEach(i=>{ const t=i.value.trim(); if(t) cool[t]=Date.now()+3000; });
+    curRid=null; clearSlots();
+    banner(msg||'Done ✔','Move to the next label');
+  }
+  // "Send to sheet" button: make sure the sheet has the latest values (e.g. typed by hand), then go to the next device
+  function send(){
+    if(!slots.sn.value.trim() && !slots.i1.value.trim() && !slots.i2.value.trim()){ toast('Nothing to send yet','bad'); return; }
+    if(!pushRow()) return;
+    finishRow('Sent ✔');
   }
   $('#pSend').onclick=send;
 
@@ -736,27 +762,27 @@ function initPhone(code){
     return '';
   }
 
+  function pickSlot(text){
+    if(isImei15(text)) return !slots.i1.value.trim()?'i1':(!slots.i2.value.trim()?'i2':null);
+    return slots.sn.value.trim()?null:'sn';
+  }
   function accept(text){
     const now=Date.now();
     if(cool[text] && cool[text]>now) return;
     if(Object.values(slots).some(i=>i.value.trim()===text)) return;          // already in a box
-    let key;
-    if(isImei15(text)){
-      key=!slots.i1.value.trim()?'i1':(!slots.i2.value.trim()?'i2':null);
-      if(!key){ softToast('IMEI1 and IMEI2 are already filled. Send or Clear first','bad'); return; }
-    }else{
-      key='sn';
-      if(slots.sn.value.trim()){ softToast('S/N is already filled. Tap ✕ on S/N to scan it again','bad'); return; }
-    }
-    slots[key].value=text; paint(); hitFlash(); beep(1200,70); buzz(40);
-    toast(LABEL[key]+': '+text,'ok');
-    const left=ORDER.filter(k=>!slots[k].value.trim()).map(k=>LABEL[k]);
+    if(curRid && now-lastScanAt>8000) finishRow('Next device');              // long pause: this is a new device
+    let key=pickSlot(text);
+    if(!key){ finishRow('Next device'); key=pickSlot(text); }                // box already taken: this barcode belongs to a new device
+    slots[key].value=text; paint(); lastScanAt=now;
+    hitFlash(); buzz(40); beep(1200,70);
     clearTimeout(sendTimer); sendTimer=null;
+    pushRow();                                                               // shows on the sheet at once
+    const left=ORDER.filter(k=>!slots[k].value.trim());
     if(!left.length){
-      banner('All 3 scanned ✔','Sending…');
-      sendTimer=setTimeout(send,600);
+      banner('All 3 scanned ✔','Next label…');
+      sendTimer=setTimeout(()=>finishRow('Done ✔'),1200);
     }else{
-      banner(LABEL[key]+' scanned ✔','Next: move the red line to another barcode, or tap Send to sheet');
+      banner(LABEL[key]+' scanned ✔','Already on the sheet. Scan the next barcode of this device, or the next device');
     }
   }
 
