@@ -172,6 +172,12 @@ tr.flash td{animation:flash 1.6s ease-out}
 .pgrid th.rn{z-index:3}
 .pgrid td.sel{outline:3px solid var(--accent);outline-offset:-3px;background:var(--accent-soft)}
 .pgrid td.rng{background:var(--accent-soft)}
+.pgrid td.last{background:var(--ok-soft);box-shadow:inset 0 0 0 2px var(--ok);font-weight:700}
+#xsMini{height:30vh;margin:6px 0 10px}
+#xsLastBar{display:flex;align-items:baseline;gap:8px;margin:10px 0 0;padding:8px 12px;border-radius:12px;background:var(--ok-soft);border:1px solid var(--ok)}
+#xsLastBar span{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase}
+#xsLastBar b{font:800 16px var(--mono);word-break:break-all;flex:1}
+#xsLastBar small{color:var(--muted);font:700 12px var(--mono)}
 .xlt td input{width:100%;height:26px;border:0;background:var(--panel);color:var(--text);font:inherit;outline:0;padding:0}
 .xlmode .stats,.xlmode .toolbar,.xlmode .sheet-card,.xlmode .dupbanner{display:none}
 .hint{color:var(--muted);font-size:13px;margin:10px 2px;line-height:1.5}
@@ -303,6 +309,8 @@ tr.flash td{animation:flash 1.6s ease-out}
   <div id="pScan">
   <div id="camWrap"><div id="cam"><video id="vid" playsinline muted autoplay></video><div class="laser"></div></div></div>
   <div class="step" id="stepBanner"></div>
+  <div id="xsLastBar" class="hidden"><span>Last scanned</span><b id="xsLastTxt">-</b><small id="xsLastAt"></small></div>
+  <div class="pgrid hidden" id="xsMini"></div>
   <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode. Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
   <div class="slots">
     <div class="slot" data-k="sn"><span class="lab">S/N</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
@@ -676,7 +684,8 @@ function initDesktop(){
     for(let r=top;r<end;r++){ const row=[]; for(let k=0;k<C;k++) row.push(cellText(r,k).slice(0,80)); data.push(row); }
     return {type:'xlsnap',on:true,name:xl.name,sheets:xl.wb.SheetNames,sheet:xl.sheet,top:top,end:end,total:total,C:C,data:data,
             r:xl.r,c:xl.c,ar:xl.ar,ac:xl.ac,state:$('#xlState').textContent,bad:!!(xl.err||!xl.handle),
-            canUndo:hist.u.length>0,canRedo:hist.r.length>0,follow:!(c&&c._xv!=null)};
+            canUndo:hist.u.length>0,canRedo:hist.r.length>0,follow:!(c&&c._xv!=null),
+            last:xl.last||null,lastText:xl.last?cellText(xl.last.r,xl.last.c).slice(0,80):''};
   }
   let xpT=0;
   function xlPushSoon(){
@@ -734,7 +743,7 @@ function initDesktop(){
     if(newDevice && xl.rowUsed){ xl.r++; xl.c=xl.startC; xl.rowUsed=false; newRow=true; }
     const dup=xlHas(text);
     xlGroup(()=>{ if(newRow) xlAutoFill(xl.r); setCell(xl.r,xl.c,text,false); });
-    xl.rowUsed=true; const placed=addr(xl.r,xl.c); xl.c++; xl.ar=xl.r; xl.ac=xl.c;
+    xl.rowUsed=true; const placed=addr(xl.r,xl.c); xl.last={r:xl.r,c:xl.c}; xl.c++; xl.ar=xl.r; xl.ac=xl.c;
     xlReveal();
     const cell=xBox().querySelector('td[data-r="'+Math.floor(XLSX.utils.decode_cell(placed).r)+'"][data-c="'+XLSX.utils.decode_cell(placed).c+'"]');
     if(cell){ cell.classList.add('flashc'); }
@@ -750,12 +759,14 @@ function initDesktop(){
     td.textContent=''; td.appendChild(inp); inp.focus();
     if(initial===undefined) inp.select(); else inp.setSelectionRange(inp.value.length,inp.value.length);
     const done=(commit,dr,dc)=>{
-      if(!xl.editing) return; xl.editing=false;
+      if(!xl.editing) return; xl.editing=false; xl.finishEdit=null;
       if(commit) setCell(xl.r,xl.c,inp.value.trim(),true);
       xlDraw(); xBox().focus();
       if(dr||dc) xlMove(dr,dc); else xlLayout();
     };
+    xl.finishEdit=done;
     inp.onkeydown=e=>{
+      e.stopPropagation();                                  // the cell grid must not see this key again (it moved the cursor twice)
       if(e.key==='Enter'){ e.preventDefault(); done(true,1,0); }
       else if(e.key==='Tab'){ e.preventDefault(); done(true,0,e.shiftKey?-1:1); }
       else if(e.key==='Escape'){ e.preventDefault(); done(false); }
@@ -764,7 +775,9 @@ function initDesktop(){
   }
   let dragging=false;
   xBox().addEventListener('mousedown',e=>{
-    const td=e.target.closest('td[data-r]'); if(!td || xl.editing || e.button!==0) return;
+    if(e.target.tagName==='INPUT') return;                  // clicking inside the cell being typed in
+    const td=e.target.closest('td[data-r]'); if(!td || e.button!==0) return;
+    if(xl.editing && xl.finishEdit) xl.finishEdit(true);     // save what was typed, then go to the clicked cell
     xlSelect(+td.dataset.r,+td.dataset.c,e.shiftKey); dragging=true;
   });
   xBox().addEventListener('mouseover',e=>{
@@ -775,7 +788,7 @@ function initDesktop(){
     xl.r=r; xl.c=c; xlDraw();
   });
   document.addEventListener('mouseup',()=>{ dragging=false; });
-  xBox().addEventListener('dblclick',e=>{ if(e.target.closest('td[data-r]') && !xl.editing) xlEdit(); });
+  xBox().addEventListener('dblclick',e=>{ if(e.target.tagName!=='INPUT' && e.target.closest('td[data-r]') && !xl.editing) xlEdit(); });
   xBox().addEventListener('keydown',e=>{
     if(xl.editing || !xl.on) return;
     const k=e.key, mod=e.ctrlKey||e.metaKey, kl=k.toLowerCase();
@@ -801,7 +814,7 @@ function initDesktop(){
   function xlUseSheet(name){
     xl.sheet=name; xl.ws=xl.wb.Sheets[name];
     xlDims();
-    xl.r=xl.usedR; xl.c=0; xl.startC=0; xl.rowUsed=false; xl.ar=xl.r; xl.ac=0; hist.u=[]; hist.r=[];      // start on the first empty row
+    xl.r=xl.usedR; xl.c=0; xl.startC=0; xl.rowUsed=false; xl.ar=xl.r; xl.ac=0; xl.last=null; hist.u=[]; hist.r=[];      // start on the first empty row
     xlLayout(); xBox().scrollTop=Math.max(0,xl.r*RH-RH*3); xlReveal();
   }
   function xlAttach(wb,name,handle,msg){
@@ -1167,7 +1180,7 @@ function initPhone(code){
   setP(false,'Connecting…'); connect();
 
   /* ---------- Excel sheet tab: see and control the computer's sheet ---------- */
-  let paused=false, snap=null, selKey='', inputDirty=false;
+  let paused=false, snap=null, selKey='', inputDirty=false, miniLast='';
   const colL=n=>{ let t=''; n++; while(n>0){ const m=(n-1)%26; t=String.fromCharCode(65+m)+t; n=Math.floor((n-1)/26); } return t; };
   const xsSend=o=>{ if(conn && conn.open){ try{ conn.send(Object.assign({type:'xlcmd'},o)); }catch(e){} } else toast('Not connected to the sheet','bad'); };
   function showTab(sheet){
@@ -1195,7 +1208,7 @@ function initPhone(code){
     $('#xsName').textContent = on ? '📗 '+m.name : 'Excel sheet';
     $('#xsState').textContent = on ? m.state : '';
     $('#xsState').style.color = on&&m.bad ? 'var(--bad)' : '';
-    if(!on) return;
+    if(!on){ $('#xsMini').classList.add('hidden'); $('#xsLastBar').classList.add('hidden'); return; }
     const sel=$('#xsSheet');
     if(m.sheets.length>1){
       sel.classList.remove('hidden');
@@ -1210,7 +1223,8 @@ function initPhone(code){
     if(!inputDirty && document.activeElement!==inp) inp.value=cellAt(m.r,m.c);
     else if(!inputDirty) inp.value=cellAt(m.r,m.c);
     // grid
-    const g=$('#xsGrid'), st=g.scrollTop, sl=g.scrollLeft;
+    const g=$('#xsGrid'), mini=$('#xsMini'), st=g.scrollTop, sl=g.scrollLeft, mst=mini.scrollTop, msl=mini.scrollLeft;
+    const lastKey=m.last?(m.last.r+':'+m.last.c+':'+m.lastText):'';
     const R0=Math.min(m.ar,m.r), R1=Math.max(m.ar,m.r), C0=Math.min(m.ac,m.c), C1=Math.max(m.ac,m.c), multi=R1>R0||C1>C0;
     let h='<table><tr><th class="rn"></th>';
     for(let c=0;c<m.C;c++) h+='<th>'+colL(c)+'</th>';
@@ -1218,13 +1232,28 @@ function initPhone(code){
     m.data.forEach((row,i)=>{
       const r=m.top+i; h+='<tr><td class="rn">'+(r+1)+'</td>';
       row.forEach((v,c)=>{
-        const cls=(r===m.r&&c===m.c)?' class="sel"':((multi&&r>=R0&&r<=R1&&c>=C0&&c<=C1)?' class="rng"':'');
+        const cl=[]; if(r===m.r&&c===m.c) cl.push('sel'); else if(multi&&r>=R0&&r<=R1&&c>=C0&&c<=C1) cl.push('rng');
+        if(m.last && r===m.last.r && c===m.last.c) cl.push('last');
+        const cls=cl.length?' class="'+cl.join(' ')+'"':'';
         h+='<td data-r="'+r+'" data-c="'+c+'"'+cls+'>'+v.replace(/[&<>"]/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[x]))+'</td>';
       });
       h+='</tr>';
     });
-    g.innerHTML=h+'</table>';
-    g.scrollTop=st; g.scrollLeft=sl;
+    h+='</table>';
+    g.innerHTML=h; mini.innerHTML=h;
+    g.scrollTop=st; g.scrollLeft=sl; mini.scrollTop=mst; mini.scrollLeft=msl;
+    // small sheet under the camera: always shows what was scanned last
+    mini.classList.remove('hidden'); $('#xsLastBar').classList.remove('hidden');
+    $('#xsLastTxt').textContent=m.last?(m.lastText||'-'):'-';
+    $('#xsLastAt').textContent=m.last?(colL(m.last.c)+(m.last.r+1)):'';
+    if(jump || lastKey!==miniLast){
+      miniLast=lastKey;
+      const t=mini.querySelector('td.last')||mini.querySelector('td.sel');
+      if(t){
+        mini.scrollTop=Math.max(0,t.offsetTop-mini.clientHeight/2+t.offsetHeight/2);
+        if(t.offsetLeft<mini.scrollLeft+50 || t.offsetLeft+t.offsetWidth>mini.scrollLeft+mini.clientWidth) mini.scrollLeft=Math.max(0,t.offsetLeft-mini.clientWidth/2);
+      }
+    }
     if(jump){
       const td=g.querySelector('td.sel');
       if(td){
@@ -1233,13 +1262,15 @@ function initPhone(code){
       }
     }
   }
-  $('#xsGrid').addEventListener('click',e=>{
+  function gridTap(e,mini){
     const td=e.target.closest('td[data-r]'); if(!td||!snap||!snap.on) return;
     const r=+td.dataset.r, c=+td.dataset.c;
-    if(r===snap.r && c===snap.c){ const i=$('#xsInput'); i.focus(); i.select(); return; }    // tap the chosen cell again = edit
+    if(!mini && r===snap.r && c===snap.c){ const i=$('#xsInput'); i.focus(); i.select(); return; }    // tap the chosen cell again = edit
     snap.r=r; snap.c=c; snap.ar=r; snap.ac=c; selKey=r+':'+c+':'+snap.sheet; inputDirty=false;
     renderSheet(false); xsSend({op:'sel',r:r,c:c});
-  });
+  }
+  $('#xsGrid').addEventListener('click',e=>gridTap(e,false));
+  $('#xsMini').addEventListener('click',e=>gridTap(e,true));
   $('#xsInput').addEventListener('input',()=>{ inputDirty=true; });
   function xsCommit(){
     if(!snap||!snap.on) return;
@@ -1461,7 +1492,7 @@ function initPhone(code){
 
   function fit(){
     const W=vid.videoWidth, H=vid.videoHeight; if(!W) return;
-    const maxW=$('#camWrap').clientWidth, maxH=Math.round(innerHeight*0.55);
+    const maxW=$('#camWrap').clientWidth, maxH=Math.round(innerHeight*0.40);
     const w=Math.min(maxW,maxH*W/H);
     cam.style.maxHeight='none'; cam.style.aspectRatio='auto';
     cam.style.width=w+'px'; cam.style.height=(w*H/W)+'px';
