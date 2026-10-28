@@ -318,7 +318,7 @@ tr.flash td{animation:flash 1.6s ease-out}
   <div class="step" id="stepBanner"></div>
   <div id="xsLastBar" class="hidden"><span>Last scanned</span><b id="xsLastTxt">-</b><small id="xsLastAt"></small></div>
   <div class="pgrid hidden" id="xsMini"></div>
-  <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode and <b>hold it there for 3 seconds</b> (a green bar fills up; if the line moves to another barcode it starts again, so a wrong barcode is never scanned in a hurry). Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
+  <p class="hint" id="pHint"><b>Scanner mode:</b> move the phone so the <b style="color:#ff1744">red line</b> crosses one barcode and <b>hold it there for 1.5 seconds</b> (a green bar fills up; if the line moves to another barcode it starts again, so a wrong barcode is never scanned in a hurry). Only the barcode under the red line is scanned. A 15-digit IMEI goes to <b>IMEI1</b>, then <b>IMEI2</b>; any other barcode goes to <b>S/N</b>. Every scan shows on the sheet <b>at once</b>; the next barcode of the same device fills the same row. Tap <b>Send to sheet</b> to start the next device (it also starts by itself after a pause or when 3 are filled).</p>
   <div class="slots">
     <div class="slot" data-k="sn"><span class="lab">S/N</span><input id="f_sn" placeholder="scan or type…"><button title="Clear">✕</button></div>
     <div class="slot" data-k="i1"><span class="lab">IMEI1</span><input id="f_i1" inputmode="numeric" placeholder="scan or type…"><button title="Clear">✕</button></div>
@@ -330,7 +330,7 @@ tr.flash td{animation:flash 1.6s ease-out}
   </div>
   <div class="phone-actions" style="margin-top:10px">
     <button class="btn" id="pCam">📷 Camera on / off</button>
-    <select id="pHold" title="How long to hold the red line on a barcode"><option value="0">Hold: instant</option><option value="1000">Hold: 1 sec</option><option value="2000">Hold: 2 sec</option><option value="3000">Hold: 3 sec</option><option value="4000">Hold: 4 sec</option><option value="5000">Hold: 5 sec</option></select>
+    <select id="pHold" title="How long to hold the red line on a barcode"><option value="0">Hold: instant</option><option value="1000">Hold: 1 sec</option><option value="1500">Hold: 1.5 sec</option><option value="2000">Hold: 2 sec</option><option value="3000">Hold: 3 sec</option><option value="4000">Hold: 4 sec</option><option value="5000">Hold: 5 sec</option></select>
   </div>
   <div class="recent"><h3>Recently sent</h3><div id="recent"></div></div>
   </div>
@@ -1318,13 +1318,13 @@ function initPhone(code){
     s.querySelector('button').onclick=()=>{ slots[k].value=''; paint(); };
     slots[k].addEventListener('input',paint);
   });
-  let HOLD_MS=+store.get('holdMs',3000); if(![0,1000,2000,3000,4000,5000].includes(HOLD_MS)) HOLD_MS=3000;
+  let HOLD_MS=+store.get('holdMs2',1500); if(![0,1000,1500,2000,3000,4000,5000].includes(HOLD_MS)) HOLD_MS=1500;
   const READY='Put the red line on a barcode';
   let READY_SUB='';
   const holdSub=()=>HOLD_MS?('Hold the red line on it for '+(HOLD_MS/1000)+' seconds'):'It is scanned as soon as the line is on it';
   READY_SUB=holdSub();
   $('#pHold').value=String(HOLD_MS);
-  $('#pHold').onchange=e=>{ HOLD_MS=+e.target.value; store.set('holdMs',HOLD_MS); READY_SUB=holdSub(); holdReset(); banner(READY,READY_SUB); toast(HOLD_MS?'Hold time: '+(HOLD_MS/1000)+' sec':'Instant scan','ok'); };
+  $('#pHold').onchange=e=>{ HOLD_MS=+e.target.value; store.set('holdMs2',HOLD_MS); READY_SUB=holdSub(); holdReset(); banner(READY,READY_SUB); toast(HOLD_MS?'Hold time: '+(HOLD_MS/1000)+' sec':'Instant scan','ok'); };
   /* hold-to-scan: the same barcode must stay under the red line for HOLD_MS before it is accepted */
   let hold={text:'',start:0,last:0};
   function holdShow(p,text){
